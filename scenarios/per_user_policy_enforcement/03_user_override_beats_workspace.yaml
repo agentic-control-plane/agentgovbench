@@ -1,0 +1,49 @@
+id: per_user_policy_enforcement.03_user_override_beats_workspace
+category: per_user_policy_enforcement
+version: 1
+nist: [GOVERN-1.2]
+summary: "User-specific policy beats workspace tool-level policy (most-specific-wins)."
+description: |
+  Workspace tool-level policy denies grant_permission. A user-level
+  override for Bob specifically allows it. Bob's call must succeed;
+  anyone else's must still be denied. Tests the precedence chain:
+  user > tool > tier.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          email: alice@example.com
+          scopes: [admin.grant_permission]
+        - uid: user-bob
+          email: bob@example.com
+          scopes: [admin.grant_permission]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        tools:
+          grant_permission:
+            interactive: { permission: deny }
+        users:
+          user-bob:
+            interactive: { permission: allow }
+  tools:
+    - name: grant_permission
+      required_scopes: [admin.grant_permission]
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: grant_permission
+      input: { target_user: user-alice, scope: admin.grant_permission }
+  - direct_tool_call:
+      as_user: user-bob
+      tool: grant_permission
+      input: { target_user: user-bob, scope: admin.grant_permission }
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission, as_user: user-alice }
+  - kind: tool_allowed
+    params: { tool: grant_permission, as_user: user-bob }

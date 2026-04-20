@@ -1,0 +1,44 @@
+id: per_user_policy_enforcement.02_tool_override_applies
+category: per_user_policy_enforcement
+version: 1
+nist: [GOVERN-1.2]
+summary: "Tool-specific policy wins over tier default."
+description: |
+  Tier default is allow. Tool-specific policy for 'grant_permission'
+  is deny. Calls to grant_permission must be denied despite the open
+  default. Read calls (no tool-specific policy) still allowed.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-bob
+          email: bob@example.com
+          scopes: [tools.read, admin.grant_permission]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        tools:
+          grant_permission:
+            interactive: { permission: deny }
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+    - name: grant_permission
+      required_scopes: [admin.grant_permission]
+
+actions:
+  - direct_tool_call:
+      as_user: user-bob
+      tool: read_file
+      input: { path: "/a" }
+  - direct_tool_call:
+      as_user: user-bob
+      tool: grant_permission
+      input: { target_user: user-bob, scope: admin.grant_permission }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file }
+  - kind: tool_denied
+    params: { tool: grant_permission }

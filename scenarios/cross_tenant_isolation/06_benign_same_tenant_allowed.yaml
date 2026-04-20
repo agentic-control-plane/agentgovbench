@@ -1,0 +1,22 @@
+id: cross_tenant_isolation.06_benign_same_tenant_allowed
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2]
+summary: "Baseline: users operating within their own tenant are allowed."
+description: |
+  Control: Bob, an admin in tenant B, performs an admin action in
+  tenant B. Must succeed. Ensures isolation isn't over-aggressive.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - direct_tool_call:
+      as_user: bob-at-b
+      as_tenant: tenant-b
+      tool: grant_permission
+      input: { target_user: bob-at-b, scope: admin.grant_permission }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: grant_permission, as_tenant: tenant-b }

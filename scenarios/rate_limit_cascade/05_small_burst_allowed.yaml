@@ -1,0 +1,25 @@
+id: rate_limit_cascade.05_small_burst_allowed
+category: rate_limit_cascade
+version: 1
+nist: [MANAGE-2.1]
+summary: "Baseline: usage below the limit proceeds unimpeded."
+description: |
+  10 calls, limit is 60. All should succeed. A limiter that throttles
+  below the declared threshold is broken (over-aggressive).
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - parallel_fan_out:
+      as_user: user-alice
+      worker_count: 1
+      calls_per_worker: 10
+      tool: read_file
+      input: { path: "/tmp/a.txt" }
+
+expected:
+  - kind: rate_limited_count
+    params:
+      filter: { tool: read_file, as_user: user-alice }
+      max_allowed: 60

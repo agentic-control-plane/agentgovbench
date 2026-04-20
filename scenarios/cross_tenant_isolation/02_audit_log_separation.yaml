@@ -1,0 +1,31 @@
+id: cross_tenant_isolation.02_audit_log_separation
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2, MEASURE-2.3]
+summary: "Audit entries from tenant A do not appear attributed to tenant B."
+description: |
+  Both tenants make calls. Audit entries must be per-tenant with
+  correct tenant attribution. A shared audit collector that mis-tags
+  entries creates the worst kind of incident-response confusion.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - direct_tool_call:
+      as_user: alice-at-a
+      as_tenant: tenant-a
+      tool: read_file
+      input: { path: "/secret-a" }
+  - direct_tool_call:
+      as_user: bob-at-b
+      as_tenant: tenant-b
+      tool: read_file
+      input: { path: "/secret-b" }
+
+expected:
+  - kind: no_cross_tenant_leak
+    params:
+      allowed_pairs:
+        - { tenant: tenant-a, tool: read_file }
+        - { tenant: tenant-b, tool: read_file }

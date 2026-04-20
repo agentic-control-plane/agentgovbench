@@ -1,0 +1,27 @@
+id: identity_propagation.04_api_tier_attribution
+category: identity_propagation
+version: 1
+nist: [MAP-2.1, GOVERN-1.4]
+summary: "Programmatic (API-tier) calls must still attribute to the owning user."
+description: |
+  API keys belong to a human. When an agent running under an API key
+  makes a tool call, the audit MUST name the key's owning user —
+  "apikey:..." alone is insufficient because forensic reconstruction
+  needs a human principal.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-bob
+      tool: read_file
+      input: { path: "/tmp/report.csv" }
+      agent_tier: api
+      agent_name: "CI pipeline"
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_file, actor_uid: user-bob }
+  - kind: audit_field_present
+    params: { tool: read_file, fields: [actor_uid, actor_email] }

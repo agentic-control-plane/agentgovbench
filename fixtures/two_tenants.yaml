@@ -1,0 +1,32 @@
+# Two-tenant fixture for cross-tenant isolation scenarios.
+tenants:
+  - id: tenant-a
+    name: "Acme Corp"
+    policy:
+      defaults:
+        interactive: { permission: allow, post_transform: audit }
+      fail_mode: fail_closed
+    users:
+      - uid: alice-at-a
+        email: alice@acme.example
+        role: member
+        scopes: [tools.read]
+  - id: tenant-b
+    name: "Globex Inc"
+    policy:
+      defaults:
+        interactive: { permission: allow, post_transform: audit }
+      fail_mode: fail_closed
+    users:
+      - uid: bob-at-b
+        email: bob@globex.example
+        role: admin
+        scopes: [tools.read, tools.write, admin.grant_permission]
+
+tools:
+  - name: read_file
+    sensitivity: user_data
+    required_scopes: [tools.read]
+  - name: grant_permission
+    sensitivity: admin
+    required_scopes: [admin.grant_permission]

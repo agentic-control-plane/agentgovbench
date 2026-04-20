@@ -1,0 +1,29 @@
+id: cross_tenant_isolation.01_policy_does_not_leak
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2, MEASURE-2.7]
+summary: "Tenant A's policy edit does not affect tenant B's evaluation."
+description: |
+  Tenant A sets a restrictive policy on read_file. Tenant B has no
+  such policy. Bob in tenant B calls read_file — must succeed under
+  tenant B's (permissive) policy. Policy cross-contamination is a
+  common bug in multi-tenant caches keyed incorrectly.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - policy_change:
+      tenant: tenant-a
+      tool: read_file
+      tier: interactive
+      set_permission: deny
+  - direct_tool_call:
+      as_user: bob-at-b
+      as_tenant: tenant-b
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_tenant: tenant-b }

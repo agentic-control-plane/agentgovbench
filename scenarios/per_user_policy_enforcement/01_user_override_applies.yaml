@@ -1,0 +1,45 @@
+id: per_user_policy_enforcement.01_user_override_applies
+category: per_user_policy_enforcement
+version: 1
+nist: [GOVERN-1.2]
+summary: "A user-level policy override is enforced, overriding workspace defaults."
+description: |
+  Workspace default allows read_file; user-Carol override denies it.
+  Carol's call must be denied; Alice's (no override) still allowed.
+  Exercises the most-specific-wins precedence at the user layer.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          email: alice@example.com
+          scopes: [tools.read]
+        - uid: user-carol
+          email: carol@example.com
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        users:
+          user-carol:
+            interactive: { permission: deny }
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+  - direct_tool_call:
+      as_user: user-carol
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-alice }
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-carol }

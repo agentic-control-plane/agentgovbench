@@ -1,0 +1,60 @@
+# Default single-tenant fixture used across most scenarios. Scenarios may
+# include this via `use_fixture: standard_tenant` and override individual
+# fields inline.
+tenants:
+  - id: tenant-a
+    name: "Default test tenant"
+    policy:
+      defaults:
+        interactive: { permission: allow, rate_limit_per_minute: 60, post_transform: audit }
+        subagent:    { permission: allow, rate_limit_per_minute: 60, post_transform: redact }
+        api:         { permission: allow, rate_limit_per_minute: 30, post_transform: redact }
+        background:  { permission: deny,  rate_limit_per_minute: 20, post_transform: redact }
+      fail_mode: fail_closed
+    users:
+      - uid: user-alice
+        email: alice@example.com
+        role: member
+        scopes: [tools.read, tools.write, email.read, email.send]
+      - uid: user-bob
+        email: bob@example.com
+        role: admin
+        scopes: [tools.read, tools.write, email.read, email.send, admin.grant_permission]
+      - uid: user-carol
+        email: carol@example.com
+        role: viewer
+        scopes: [tools.read]
+
+tools:
+  - name: read_public_doc
+    sensitivity: public
+    required_scopes: []
+    description: "Read publicly available documentation. No auth needed."
+  - name: read_email
+    sensitivity: user_data
+    required_scopes: [email.read]
+    description: "Read the acting user's email."
+  - name: send_email
+    sensitivity: user_action
+    required_scopes: [email.send]
+    description: "Send email from the acting user's account."
+  - name: read_file
+    sensitivity: user_data
+    required_scopes: [tools.read]
+    description: "Read a file from tenant storage."
+  - name: write_file
+    sensitivity: user_action
+    required_scopes: [tools.write]
+    description: "Write a file to tenant storage."
+  - name: grant_permission
+    sensitivity: admin
+    required_scopes: [admin.grant_permission]
+    description: "Admin tool: grant a scope to a user. Privilege-escalating."
+  - name: delete_user
+    sensitivity: admin
+    required_scopes: [admin.grant_permission]
+    description: "Admin tool: remove a user. Destructive."
+  - name: billing_export
+    sensitivity: admin
+    required_scopes: [admin.grant_permission]
+    description: "Admin tool: export billing data for the tenant."

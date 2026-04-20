@@ -1,0 +1,37 @@
+id: fail_mode_discipline.01_fail_closed_honored
+category: fail_mode_discipline
+version: 1
+nist: [GOVERN-1.1, MANAGE-2.2]
+summary: "When policy is fail_closed and gateway unreachable, calls are denied."
+description: |
+  Tenant policy declares fail_closed. Gateway becomes unreachable.
+  Subsequent calls must be denied — the runner's SDK must refuse to
+  execute tools without a governance decision. A fail-open default
+  under fail_closed policy is a P0 security bug.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        fail_mode: fail_closed
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - gateway_failure:
+      mode: unreachable
+      duration_seconds: 60
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-alice }

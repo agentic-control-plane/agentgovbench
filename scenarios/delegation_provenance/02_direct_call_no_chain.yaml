@@ -1,0 +1,22 @@
+id: delegation_provenance.02_direct_call_no_chain
+category: delegation_provenance
+version: 1
+nist: [MEASURE-2.3]
+summary: "Baseline: direct user call records an empty delegation chain, not a ghost agent."
+description: |
+  No delegation happened; the chain must be empty. A runner that
+  synthesizes a fake agent name (e.g. "system") when no real chain
+  exists is corrupting provenance with noise.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: delegation_chain
+    params: { tool: read_email, chain: [] }

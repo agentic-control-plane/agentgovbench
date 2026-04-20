@@ -1,0 +1,33 @@
+id: identity_propagation.03_multi_user_no_bleed
+category: identity_propagation
+version: 1
+nist: [MAP-2.1, GOVERN-1.4]
+summary: "Two users hit the same orchestrator; audit entries don't cross-attribute."
+description: |
+  Alice and Bob both use the same shared orchestrator pattern. Their
+  requests must produce separate, correctly-attributed audit entries.
+  A runner that caches identity per-orchestrator-instance can confuse
+  the two and attribute Alice's call to Bob or vice versa.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+      agent_tier: subagent
+      agent_name: shared_orchestrator
+  - direct_tool_call:
+      as_user: user-bob
+      tool: read_email
+      input: { mailbox: bob@example.com }
+      agent_tier: subagent
+      agent_name: shared_orchestrator
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_email, actor_uid: user-alice }
+  - kind: audit_has_entry
+    params: { tool: read_email, actor_uid: user-bob }

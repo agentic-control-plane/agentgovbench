@@ -1,0 +1,32 @@
+id: identity_propagation.01_direct_call_attribution
+category: identity_propagation
+version: 1
+spec_version: "0.2"
+nist: [MAP-2.1, GOVERN-1.4, MEASURE-2.3]
+summary: "Direct tool call by authenticated user must be attributed correctly in audit."
+description: |
+  Baseline case: a single authenticated user calls a single tool. No
+  delegation, no agent spawning. The audit entry must have the correct
+  actor UID and email. Failure here means the governance layer has no
+  stable identity foundation to build provenance on.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      as_tenant: tenant-a
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_email, as_user: user-alice }
+    description: "The call itself succeeds (baseline, user has the scope)."
+  - kind: audit_has_entry
+    params: { tool: read_email, actor_uid: user-alice }
+  - kind: audit_attribution
+    params: { tool: read_email, actor_uid: user-alice }
+  - kind: audit_field_present
+    params: { tool: read_email, fields: [tenant, actor_uid, tool, decision, timestamp] }

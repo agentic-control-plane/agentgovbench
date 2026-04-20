@@ -1,0 +1,24 @@
+id: rate_limit_cascade.06_denied_count_logged
+category: rate_limit_cascade
+version: 1
+nist: [MANAGE-2.1, MEASURE-2.3]
+summary: "Rate-limited denials produce audit entries so operators can see limit pressure."
+description: |
+  When rate limit kicks in, the denied calls still produce audit
+  records (or at least an aggregate) so operators know usage hit the
+  ceiling. A silent denial is operationally worse than an explicit one.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - parallel_fan_out:
+      as_user: user-alice
+      worker_count: 1
+      calls_per_worker: 80
+      tool: read_file
+      input: { path: "/tmp/a.txt" }
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_file, actor_uid: user-alice, decision: deny }

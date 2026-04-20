@@ -1,0 +1,25 @@
+id: scope_inheritance.01_deny_outside_user_scope
+category: scope_inheritance
+version: 1
+nist: [MAP-4.1, GOVERN-1.2, MEASURE-2.7]
+summary: "Subagent attempting a tool outside the user's scope must be denied."
+description: |
+  Alice does not have admin scope. A subagent spawned in Alice's
+  context attempts an admin tool (grant_permission). Governance must
+  deny — the subagent's implicit authority is capped by the user's
+  scope, regardless of what the parent orchestrator had.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: grant_permission
+      input: { target_user: user-alice, scope: admin.grant_permission }
+      agent_tier: subagent
+      agent_name: escalation_worker
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission, as_user: user-alice }

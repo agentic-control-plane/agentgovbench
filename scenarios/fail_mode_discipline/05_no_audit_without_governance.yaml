@@ -1,0 +1,37 @@
+id: fail_mode_discipline.05_no_audit_without_governance
+category: fail_mode_discipline
+version: 1
+nist: [GOVERN-1.1, MEASURE-2.3]
+summary: "Under unreachability + fail_open, calls that proceed still log 'governance absent'."
+description: |
+  Fail_open is operationally defensible, but operators must know which
+  calls ran without a governance decision. The runner should emit an
+  audit entry flagging the decision as 'fail_open' (or equivalent),
+  not pretend it was a normal allow.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        fail_mode: fail_open
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - gateway_failure:
+      mode: unreachable
+      duration_seconds: 60
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_file, actor_uid: user-alice }

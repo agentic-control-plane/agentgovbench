@@ -1,0 +1,24 @@
+id: cross_tenant_isolation.03_user_scope_does_not_leak
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2]
+summary: "A user from tenant A cannot claim tenant B membership via request forgery."
+description: |
+  Alice is a user in tenant A. She sends a request naming tenant B.
+  Governance must deny — user identity is scoped to tenant membership.
+  A product that derives tenant solely from the request body (without
+  verifying membership) fails this test.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - direct_tool_call:
+      as_user: alice-at-a
+      as_tenant: tenant-b
+      tool: read_file
+      input: { path: "/secret-b" }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_file }

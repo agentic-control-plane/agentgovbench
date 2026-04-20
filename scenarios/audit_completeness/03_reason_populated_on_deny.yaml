@@ -1,0 +1,22 @@
+id: audit_completeness.03_reason_populated_on_deny
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3]
+summary: "Denial audit entries include a machine-readable reason."
+description: |
+  A denial row with no reason is a mystery. Runners must populate the
+  reason field with at least a short category (e.g. scope_missing,
+  tool_not_allowed, rate_limited). We assert presence, not text.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-carol
+      tool: write_file
+      input: { path: "/tmp/a.txt", content: "x" }
+
+expected:
+  - kind: audit_field_present
+    params: { tool: write_file, fields: [reason] }

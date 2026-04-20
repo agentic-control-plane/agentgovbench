@@ -1,0 +1,23 @@
+id: scope_inheritance.05_viewer_cannot_write
+category: scope_inheritance
+version: 1
+nist: [GOVERN-1.2]
+summary: "Viewer-role user's subagent cannot perform a write."
+description: |
+  Carol has viewer role (read-only). A subagent under Carol tries to
+  write a file. Governance must deny based on the user's role-derived
+  scopes, not on whatever the agent claims.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-carol
+      tool: write_file
+      input: { path: "/tmp/a.txt", content: "hi" }
+      agent_tier: subagent
+
+expected:
+  - kind: tool_denied
+    params: { tool: write_file, as_user: user-carol }

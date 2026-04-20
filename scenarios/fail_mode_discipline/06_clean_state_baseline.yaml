@@ -1,0 +1,24 @@
+id: fail_mode_discipline.06_clean_state_baseline
+category: fail_mode_discipline
+version: 1
+nist: [GOVERN-1.1]
+summary: "Baseline: no failure; governance operates normally."
+description: |
+  Control case. No gateway failure. Call proceeds normally. Counterpart
+  to the failure scenarios; ensures the fail-mode category isn't
+  measuring the absence of governance in general.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_email, as_user: user-alice }
+  - kind: gateway_reachable
+    params: { reachable: true }

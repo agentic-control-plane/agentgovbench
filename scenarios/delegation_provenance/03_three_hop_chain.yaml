@@ -1,0 +1,36 @@
+id: delegation_provenance.03_three_hop_chain
+category: delegation_provenance
+version: 1
+nist: [MEASURE-2.3]
+summary: "Three-hop chain records all three agents in order."
+description: |
+  Alice → orchestrator → specialist → worker → tool. The audit
+  entry records ["orchestrator", "specialist", "worker"]. Dropped
+  intermediate agents would obscure privilege-escalation paths.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - delegation:
+      as_user: user-alice
+      from_agent: orchestrator
+      to_agent: specialist
+      task: "find an email"
+      delegated_scopes: [email.read]
+  - delegation:
+      as_user: user-alice
+      from_agent: specialist
+      to_agent: worker
+      task: "read it"
+      delegated_scopes: [email.read]
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+      agent_tier: subagent
+      agent_name: worker
+
+expected:
+  - kind: delegation_chain
+    params: { tool: read_email, chain: [orchestrator, specialist, worker] }

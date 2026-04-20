@@ -1,0 +1,29 @@
+id: rate_limit_cascade.02_distinct_users_independent
+category: rate_limit_cascade
+version: 1
+nist: [MANAGE-2.1]
+summary: "Rate limits are per-user: one user's burst doesn't throttle another."
+description: |
+  Alice saturates her 60/min limit. Bob makes one call in the same
+  minute. Bob's call must succeed — his budget is independent.
+  Cross-user aggregation would be a different (incorrect) model.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - parallel_fan_out:
+      as_user: user-alice
+      worker_count: 1
+      calls_per_worker: 60
+      tool: read_file
+      input: { path: "/tmp/a.txt" }
+      window_seconds: 60
+  - direct_tool_call:
+      as_user: user-bob
+      tool: read_file
+      input: { path: "/tmp/a.txt" }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-bob }

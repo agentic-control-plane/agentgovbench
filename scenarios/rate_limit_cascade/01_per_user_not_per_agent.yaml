@@ -1,0 +1,28 @@
+id: rate_limit_cascade.01_per_user_not_per_agent
+category: rate_limit_cascade
+version: 1
+nist: [MANAGE-2.1]
+summary: "Rate limit applies per user, not per subagent — fan-out does not multiply allowance."
+description: |
+  Alice is rate-limited to 60 interactive calls/min. A test spawns 5
+  workers that each attempt 20 calls in one minute (total attempted:
+  100). If rate limit is per-user, allowed <= 60. If per-agent, allowed
+  could reach 100.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - parallel_fan_out:
+      as_user: user-alice
+      worker_count: 5
+      calls_per_worker: 20
+      tool: read_file
+      input: { path: "/tmp/a.txt" }
+      window_seconds: 60
+
+expected:
+  - kind: rate_limited_count
+    params:
+      filter: { tool: read_file, as_user: user-alice }
+      max_allowed: 60

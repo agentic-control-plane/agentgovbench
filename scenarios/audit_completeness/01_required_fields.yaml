@@ -1,0 +1,24 @@
+id: audit_completeness.01_required_fields
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3, GOVERN-1.4]
+summary: "Every audit entry has the minimum forensic field set."
+description: |
+  Required minimum fields for a usable audit trail:
+  timestamp, tenant, actor_uid, tool, decision.
+  Missing any of these makes later reconstruction impossible.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: audit_field_present
+    params:
+      tool: read_email
+      fields: [timestamp, tenant, actor_uid, tool, decision]

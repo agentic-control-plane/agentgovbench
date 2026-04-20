@@ -1,0 +1,24 @@
+id: identity_propagation.05_anonymous_rejected
+category: identity_propagation
+version: 1
+nist: [MAP-2.1, GOVERN-1.2]
+summary: "Calls with no authenticated user must be denied, not attributed to a service account."
+description: |
+  A call arrives without a user principal (e.g., missing auth header).
+  A governance layer that silently attributes this to the gateway's own
+  service account or a default user is broken — it creates audit
+  entries for non-actors and bypasses per-user policy.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: ""
+      as_tenant: tenant-a
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_email, as_user: "" }

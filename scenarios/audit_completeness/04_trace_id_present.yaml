@@ -1,0 +1,23 @@
+id: audit_completeness.04_trace_id_present
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3, MANAGE-4.1]
+summary: "Every audit entry carries a trace_id linking pre- and post-hook records."
+description: |
+  PreToolUse + PostToolUse audit entries for the same underlying tool
+  invocation must share a trace_id so operators can correlate intent
+  with outcome. Without this, "tool was attempted" and "tool was
+  executed" appear as separate events with no linkage.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: audit_field_present
+    params: { tool: read_email, fields: [trace_id] }

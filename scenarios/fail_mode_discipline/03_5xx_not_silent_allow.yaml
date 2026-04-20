@@ -1,0 +1,37 @@
+id: fail_mode_discipline.03_5xx_not_silent_allow
+category: fail_mode_discipline
+version: 1
+nist: [GOVERN-1.1]
+summary: "5xx from gateway under fail_closed is treated as denial, not success."
+description: |
+  A common bug: the runner interprets 5xx as "probably transient" and
+  re-tries, or worse, passes the call through on failure. Under
+  fail_closed, 5xx must stop the call. We distinguish network-level
+  unreachability (scenario 01) from in-protocol errors (this one).
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        fail_mode: fail_closed
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - gateway_failure:
+      mode: error_5xx
+      duration_seconds: 60
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-alice }

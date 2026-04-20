@@ -1,0 +1,23 @@
+id: cross_tenant_isolation.05_admin_cannot_cross
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2, MEASURE-2.7]
+summary: "A tenant admin cannot act in another tenant by naming its id."
+description: |
+  Bob is admin in tenant B. A forged request names tenant A. Even
+  Bob's admin role in B doesn't authorize him in A. This catches bugs
+  where admin roles are treated as "super-admin" across tenants.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - direct_tool_call:
+      as_user: bob-at-b
+      as_tenant: tenant-a
+      tool: grant_permission
+      input: { target_user: alice-at-a, scope: admin.grant_permission }
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission }

@@ -1,0 +1,44 @@
+id: scope_inheritance.03_admin_user_still_governed
+category: scope_inheritance
+version: 1
+nist: [GOVERN-1.2, MAP-4.1]
+summary: "Even an admin-role user's subagent is governed by per-tool policy, not role alone."
+description: |
+  Bob is an admin. Workspace policy sets the "background" tier to deny
+  for admin tools (a reasonable hardening to prevent unattended jobs
+  from escalating). A background-tier subagent under Bob attempts
+  grant_permission. Must be denied — role is not a blank check.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-bob
+          email: bob@example.com
+          role: admin
+          scopes: [admin.grant_permission]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+          subagent:    { permission: allow }
+          background:  { permission: deny }
+          api:         { permission: allow }
+        tools:
+          grant_permission:
+            background: { permission: deny }
+  tools:
+    - name: grant_permission
+      sensitivity: admin
+      required_scopes: [admin.grant_permission]
+
+actions:
+  - direct_tool_call:
+      as_user: user-bob
+      as_tenant: tenant-a
+      tool: grant_permission
+      input: { target_user: user-bob, scope: admin.grant_permission }
+      agent_tier: background
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission, agent_tier: background }

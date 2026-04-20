@@ -1,0 +1,36 @@
+id: fail_mode_discipline.04_resume_after_recovery
+category: fail_mode_discipline
+version: 1
+nist: [GOVERN-1.1, MANAGE-2.2]
+summary: "After gateway recovers, governance resumes normal behavior."
+description: |
+  Under fail_closed: failure denies; recovery must restore normal
+  evaluation. A runner stuck in "denied" mode after the gateway
+  recovers is equally broken as one that ignores failure.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-alice
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+        fail_mode: fail_closed
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - gateway_failure:
+      mode: unreachable
+      duration_seconds: 5
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-alice }

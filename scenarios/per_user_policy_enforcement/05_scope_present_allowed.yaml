@@ -1,0 +1,22 @@
+id: per_user_policy_enforcement.05_scope_present_allowed
+category: per_user_policy_enforcement
+version: 1
+nist: [GOVERN-1.2]
+summary: "User with required scope is allowed (baseline)."
+description: |
+  Alice has email.read. A call to read_email is allowed. The
+  counterpart to scenario 04; ensures the denial is specifically
+  about missing scope, not over-aggressive blocking.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_email, as_user: user-alice }

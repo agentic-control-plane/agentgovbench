@@ -1,0 +1,31 @@
+id: scope_inheritance.02_parent_cannot_expand_child
+category: scope_inheritance
+version: 1
+nist: [MAP-4.1, MEASURE-2.7]
+summary: "Orchestrator cannot grant a subagent scope the orchestrator itself lacks."
+description: |
+  The orchestrator delegates work with an asserted scope that exceeds
+  what the requesting user has. The subagent tries to use that scope.
+  Governance must not honor the delegation's claimed scopes — effective
+  scope is always ≤ user scope ∩ declared-task scope.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - delegation:
+      as_user: user-alice
+      from_agent: orchestrator
+      to_agent: worker
+      task: "escalate permissions"
+      delegated_scopes: [admin.grant_permission]  # scope Alice doesn't have
+  - direct_tool_call:
+      as_user: user-alice
+      tool: grant_permission
+      input: { target_user: user-alice, scope: admin.grant_permission }
+      agent_tier: subagent
+      agent_name: worker
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission }

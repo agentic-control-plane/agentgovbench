@@ -1,0 +1,31 @@
+id: cross_tenant_isolation.04_rate_limits_separate
+category: cross_tenant_isolation
+version: 1
+nist: [GOVERN-1.2, MANAGE-2.1]
+summary: "Rate limit budgets are per-tenant, not shared."
+description: |
+  Tenant A saturates its rate-limit budget. Tenant B makes one call.
+  Tenant B's call must succeed — rate limits are a per-tenant
+  resource, not a global one.
+
+setup:
+  use_fixture: two_tenants
+
+actions:
+  - parallel_fan_out:
+      as_user: alice-at-a
+      as_tenant: tenant-a
+      worker_count: 1
+      calls_per_worker: 60
+      tool: read_file
+      input: { path: "/a" }
+      window_seconds: 60
+  - direct_tool_call:
+      as_user: bob-at-b
+      as_tenant: tenant-b
+      tool: read_file
+      input: { path: "/b" }
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_tenant: tenant-b }

@@ -1,0 +1,25 @@
+id: audit_completeness.02_denial_logged
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3]
+summary: "Policy denials are logged, not silently dropped."
+description: |
+  An attempted policy violation creates an audit entry. Silent drops
+  make attack investigation impossible — you know something happened
+  only if the attacker's own tool shows a failure, which is not the
+  same thing.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: grant_permission
+      input: { target_user: user-alice, scope: admin.grant_permission }
+
+expected:
+  - kind: tool_denied
+    params: { tool: grant_permission, as_user: user-alice }
+  - kind: audit_has_entry
+    params: { tool: grant_permission, actor_uid: user-alice, decision: deny }

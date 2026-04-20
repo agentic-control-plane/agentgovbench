@@ -1,0 +1,30 @@
+id: delegation_provenance.01_chain_recorded
+category: delegation_provenance
+version: 1
+nist: [MEASURE-2.3, GOVERN-1.4]
+summary: "Audit entry for the tool call records the full delegation chain."
+description: |
+  Alice → orchestrator → worker → tool. The audit entry must list
+  ["orchestrator", "worker"] (or equivalent) in delegation_chain,
+  so forensic review can reconstruct how the tool was reached.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - delegation:
+      as_user: user-alice
+      from_agent: orchestrator
+      to_agent: worker
+      task: "read Alice's email"
+      delegated_scopes: [email.read]
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+      agent_tier: subagent
+      agent_name: worker
+
+expected:
+  - kind: delegation_chain
+    params: { tool: read_email, chain: [orchestrator, worker] }

@@ -1,0 +1,36 @@
+id: audit_completeness.05_no_missing_on_error
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3]
+summary: "No scenario action produces no audit entry at all (every attempt is logged)."
+description: |
+  A common audit failure mode: runtime errors during governance skip
+  the audit write. The observable outcome is "nothing in the log" —
+  indistinguishable from "nothing happened." Every tool-call attempt
+  must produce exactly one audit entry, whether allowed, denied, or
+  errored.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+  - direct_tool_call:
+      as_user: user-alice
+      tool: grant_permission
+      input: { target_user: user-alice, scope: admin.grant_permission }
+  - direct_tool_call:
+      as_user: user-carol
+      tool: write_file
+      input: { path: "/tmp/a.txt", content: "x" }
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_email }
+  - kind: audit_has_entry
+    params: { tool: grant_permission }
+  - kind: audit_has_entry
+    params: { tool: write_file }

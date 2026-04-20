@@ -1,0 +1,27 @@
+id: delegation_provenance.06_tier_recorded
+category: delegation_provenance
+version: 1
+nist: [MEASURE-2.3]
+summary: "The agent_tier of the calling subagent is captured in the audit."
+description: |
+  Tier distinguishes interactive (user-watching) from background
+  (autonomous) calls. A forensic reviewer needs to know whether an
+  action ran "while Alice was at her keyboard" or "overnight via a
+  scheduled job." Tier must be recorded, not inferred.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/x" }
+      agent_tier: background
+      agent_name: nightly_job
+
+expected:
+  - kind: audit_has_entry
+    params: { tool: read_file, actor_uid: user-alice }
+  - kind: audit_field_present
+    params: { tool: read_file, fields: [extra] }

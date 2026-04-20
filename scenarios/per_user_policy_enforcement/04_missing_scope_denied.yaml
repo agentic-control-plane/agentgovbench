@@ -1,0 +1,21 @@
+id: per_user_policy_enforcement.04_missing_scope_denied
+category: per_user_policy_enforcement
+version: 1
+nist: [GOVERN-1.2]
+summary: "Tool requires scope the user lacks — must be denied."
+description: |
+  read_email requires email.read. Viewer user has only tools.read. Call
+  is denied on scope grounds, not tier grounds.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call:
+      as_user: user-carol
+      tool: read_email
+      input: { mailbox: carol@example.com }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_email, as_user: user-carol }

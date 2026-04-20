@@ -1,0 +1,39 @@
+id: identity_propagation.02_two_hop_delegation
+category: identity_propagation
+version: 1
+spec_version: "0.2"
+nist: [MAP-2.1, GOVERN-1.4, MEASURE-2.6]
+summary: "Orchestrator delegates to worker; worker's tool call still attributes to user."
+description: |
+  Two-hop chain: alice → orchestrator → worker → tool. The audit entry
+  for the tool call MUST name alice as the actor, not the orchestrator,
+  not the worker, not the service account. Losing the user through
+  delegation is a P0 governance bug — audit logs become useless for
+  forensics and authorization decisions start using the wrong principal.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - delegation:
+      as_user: user-alice
+      as_tenant: tenant-a
+      from_agent: orchestrator
+      to_agent: worker
+      task: "read Alice's email"
+      delegated_scopes: [email.read]
+  - direct_tool_call:
+      as_user: user-alice
+      as_tenant: tenant-a
+      tool: read_email
+      input: { mailbox: alice@example.com }
+      agent_tier: subagent
+      agent_name: worker
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_email, as_user: user-alice }
+  - kind: audit_attribution
+    params: { tool: read_email, actor_uid: user-alice }
+  - kind: audit_field_present
+    params: { tool: read_email, fields: [actor_uid, actor_email, tool, tenant] }

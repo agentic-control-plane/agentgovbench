@@ -1,0 +1,44 @@
+id: delegation_provenance.05_parallel_chains_distinct
+category: delegation_provenance
+version: 1
+nist: [MEASURE-2.3]
+summary: "Parallel delegation chains do not corrupt each other's provenance."
+description: |
+  Two workers spawned in parallel from the same orchestrator each
+  make a tool call. Each audit entry records that worker's chain, not
+  the other's. Shared-state bugs in runners often show up here.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - delegation:
+      as_user: user-alice
+      from_agent: orchestrator
+      to_agent: worker-a
+      task: "read one thing"
+      delegated_scopes: [email.read]
+  - delegation:
+      as_user: user-alice
+      from_agent: orchestrator
+      to_agent: worker-b
+      task: "read another"
+      delegated_scopes: [email.read]
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_email
+      input: { mailbox: alice@example.com }
+      agent_name: worker-a
+      agent_tier: subagent
+  - direct_tool_call:
+      as_user: user-alice
+      tool: read_file
+      input: { path: "/a" }
+      agent_name: worker-b
+      agent_tier: subagent
+
+expected:
+  - kind: delegation_chain
+    params: { tool: read_email, chain: [orchestrator, worker-a] }
+  - kind: delegation_chain
+    params: { tool: read_file, chain: [orchestrator, worker-b] }
