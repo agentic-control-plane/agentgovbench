@@ -1,17 +1,13 @@
 id: per_user_policy_enforcement.03_user_override_beats_workspace
 category: per_user_policy_enforcement
-version: 2
+version: 3
 nist: [GOVERN-1.2]
-summary: "Tool-specific user override beats tool-specific workspace deny."
+summary: "User tool-specific override beats workspace tool-specific deny."
 description: |
-  Workspace tool-level policy denies grant_permission. A tool-specific
-  user override for Bob specifically allows it. Bob's call must succeed;
-  Alice (no override) still denied. Tests most-specific-wins across the
-  4-layer precedence chain: workspace.tools > user.tools > user.defaults > workspace.defaults.
-
-  Revised in v2: original scenario used a user-level *tier* override,
-  which is less specific than the workspace *tool* override in ACP's
-  resolution model and is correctly not expected to win.
+  Workspace tool-level policy denies grant_permission. A user tool-
+  specific override for Bob allows it. Bob's call must succeed; Alice
+  (no override) still denied. Tests most-specific-wins precedence:
+  user.tools > workspace.tools > user.defaults > workspace.defaults.
 
 setup:
   tenants:
@@ -29,6 +25,10 @@ setup:
         tools:
           grant_permission:
             interactive: { permission: deny }
+        user_tools:
+          user-bob:
+            grant_permission:
+              interactive: { permission: allow }
   tools:
     - name: grant_permission
       required_scopes: [admin.grant_permission]

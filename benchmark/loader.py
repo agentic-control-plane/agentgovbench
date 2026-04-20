@@ -55,6 +55,11 @@ def _build_setup(setup_dict: dict[str, Any], fixtures_dir: Path) -> Setup:
                    for tool, tiers in pol.get("tools", {}).items()},
             users={uid: {tier: TierPolicy(**tp) for tier, tp in tiers.items()}
                    for uid, tiers in pol.get("users", {}).items()},
+            user_tools={
+                uid: {tool: {tier: TierPolicy(**tp) for tier, tp in tiers.items()}
+                      for tool, tiers in tools.items()}
+                for uid, tools in pol.get("user_tools", {}).items()
+            },
             fail_mode=pol.get("fail_mode", "fail_closed"),
         )
         tenants.append(Tenant(

@@ -46,8 +46,11 @@ class Policy:
     """A workspace governance policy doc. Simplified shape across runners."""
     defaults: dict[str, TierPolicy] = field(default_factory=dict)  # tier → TierPolicy
     tools: dict[str, dict[str, TierPolicy]] = field(default_factory=dict)
-    # user-scoped overrides. uid → { tier → TierPolicy }
+    # user-scoped tier-level overrides. uid → { tier → TierPolicy }
     users: dict[str, dict[str, TierPolicy]] = field(default_factory=dict)
+    # user-scoped tool-specific overrides. uid → { tool → tier → TierPolicy }.
+    # Wins over workspace.tools (most-specific-wins).
+    user_tools: dict[str, dict[str, dict[str, TierPolicy]]] = field(default_factory=dict)
     # declared fail mode when gateway unreachable
     fail_mode: Literal["fail_open", "fail_closed"] = "fail_closed"
 

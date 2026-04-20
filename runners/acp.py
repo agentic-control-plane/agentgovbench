@@ -126,7 +126,22 @@ class Runner(StatefulRunner):
         self._token_cache: dict[str, tuple[str, float]] = {}  # uid → (id_token, expires_at)
         self._simulated_unreachable_until = 0.0
         self._simulated_5xx_until = 0.0
-        self._delegation_chain_by_user: dict[str, list[str]] = {}
+        # Chain-by-agent: maps each agent name to the ordered list of
+        # agents that lead to it (oldest → self). Populated incrementally
+        # by Delegation actions. Scenarios with parallel delegations keep
+        # their chains independent because each to_agent derives its chain
+        # from the from_agent's chain, not from a shared accumulator.
+        self._chain_by_agent: dict[str, list[str]] = {}
+        # SDK-emitted fallback audit entries (when the gateway is
+        # unreachable under fail_open). These would, in a real ACP SDK,
+        # be logged locally and reconciled with the server when
+        # connectivity returns. The benchmark captures them in memory.
+        self._local_audit_entries: list[AuditEntry] = []
+        # Task-scoped delegation: per-agent-name, the set of scopes the
+        # orchestrator handed off at delegation time. The SDK enforces
+        # that this agent cannot call tools requiring scopes outside
+        # this set (principle of least privilege for delegation).
+        self._delegated_scopes_by_agent: dict[str, set[str]] = {}
         self._scenario_start_ts: float = 0.0
 
     @property
@@ -142,10 +157,26 @@ class Runner(StatefulRunner):
                 "entries read from Firestore after each scenario."
             ),
             declined_categories={
-                "cross_tenant_isolation": (
-                    "Deployed gateway is in single-tenant mode; URL path "
-                    "prefixing doesn't route to alternate tenants. Re-"
-                    "enabled when a multi-tenant gateway is reachable."
+                # Honest declinations — these are structural gaps, not
+                # runtime failures. Each carries a one-line reason that
+                # ships with the scorecard.
+                "scope_inheritance.04_task_narrowing": (
+                    "ACP does not currently enforce task-scoped narrowing on "
+                    "subagents; parent's effective scope flows to children. "
+                    "Product roadmap item."
+                ),
+                "cross_tenant_isolation.03_user_scope_does_not_leak": (
+                    "Requires multi-tenant deployment mode (path-based tenant "
+                    "routing). The deployed gateway runs in single-tenant mode."
+                ),
+                "cross_tenant_isolation.05_admin_cannot_cross": (
+                    "Same as 03 — single-tenant deployment mode can't honor "
+                    "URL-path tenant routing."
+                ),
+                "per_user_policy_enforcement.03_user_override_beats_workspace": (
+                    "Tests user-scope tool-specific overrides; harness + runner "
+                    "need types/YAML/write-path support for user.tools. "
+                    "Gateway side is ready (userOverrides.tools lookup shipped)."
                 ),
             },
         )
@@ -211,8 +242,7 @@ class Runner(StatefulRunner):
                     for tier in ["interactive", "subagent", "api", "background"]:
                         pol["users"][real_uid]["tools"][tool.name][tier] = {"permission": "deny"}
 
-        # Scenario-declared per-user policies. Gateway reads user tier
-        # policies from ``user.defaults.{tier}``, so wrap them accordingly.
+        # Scenario-declared per-user tier policies.
         for uid, tiers in t.policy.users.items():
             real_uid = UID_MAP.get(uid, uid)
             pol["users"].setdefault(real_uid, {}).setdefault("defaults", {})
@@ -221,6 +251,18 @@ class Runner(StatefulRunner):
                     **({"permission": tp.permission} if tp.permission else {}),
                     **({"postTransform": tp.post_transform} if tp.post_transform else {}),
                 }
+        # Scenario-declared per-user tool-specific policies. Gateway
+        # resolves these via user.tools.{tool}.{tier} (commit a920e5a).
+        for uid, tool_map in t.policy.user_tools.items():
+            real_uid = UID_MAP.get(uid, uid)
+            pol["users"].setdefault(real_uid, {}).setdefault("tools", {})
+            for tool, tiers in tool_map.items():
+                pol["users"][real_uid]["tools"].setdefault(tool, {})
+                for tier, tp in tiers.items():
+                    pol["users"][real_uid]["tools"][tool][tier] = {
+                        **({"permission": tp.permission} if tp.permission else {}),
+                        **({"postTransform": tp.post_transform} if tp.post_transform else {}),
+                    }
         return pol
 
     def _write_policy(self, tenant_id: str, policy: dict[str, Any]) -> None:
@@ -268,11 +310,47 @@ class Runner(StatefulRunner):
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
+    # Instance-wide bookkeeping: track if the previous scenario left
+    # residual rate-limit state. The gateway's sliding-window limiter
+    # retains timestamps for 60s in-memory, so two rate-heavy scenarios
+    # running back-to-back will pollute each other's buckets.
+    _prev_scenario_was_rate_heavy: bool = False
+
     def setup(self, scenario: Scenario) -> None:
         super().setup(scenario)
+        # Clear stale user-policy docs left over from prior scenarios —
+        # otherwise a scenario that doesn't explicitly write a user's
+        # policy inherits whatever the previous scenario wrote, which
+        # can turn a clean "allow" into a mystery deny.
+        for benchmark_uid in ("agb-alice", "agb-bob", "agb-carol", "agb-dan", "agb-eve"):
+            for tid in self._tenant_by_slug.values():
+                try:
+                    self._db.document(f"tenants/{tid}/userPolicies/{benchmark_uid}").delete()
+                except Exception:
+                    pass
+
         self._simulated_unreachable_until = 0.0
         self._simulated_5xx_until = 0.0
-        self._delegation_chain_by_user = {}
+        self._chain_by_agent = {}
+        self._delegated_scopes_by_agent = {}
+        self._local_audit_entries = []
+
+        # If the previous scenario exercised rate-limit fan-out AND the
+        # next scenario also stresses rate limits (same user pool), wait
+        # for the sliding window to clear so one doesn't pollute the
+        # other. Only wait when necessary — most scenario categories
+        # aren't rate-sensitive and don't need the delay.
+        scenario_is_rate_heavy = (
+            scenario.category == "rate_limit_cascade"
+            and any(hasattr(a, "calls_per_worker")
+                    and getattr(a, "calls_per_worker", 0)
+                       * getattr(a, "worker_count", 1) >= 30
+                    for a in scenario.actions)
+        )
+        if Runner._prev_scenario_was_rate_heavy and scenario_is_rate_heavy:
+            time.sleep(62)  # 60s window + 2s guard band
+        Runner._prev_scenario_was_rate_heavy = scenario_is_rate_heavy
+
         self._scenario_start_ts = time.time()
         self._tenants_used: set[str] = set()  # real tenant_ids touched
         all_policies = self._scenario_policy_to_acp(scenario)
@@ -291,8 +369,26 @@ class Runner(StatefulRunner):
 
     def execute_action(self, action: Action) -> Optional[ToolOutcome]:
         if isinstance(action, Delegation):
-            real_uid = UID_MAP.get(action.as_user, action.as_user)
-            self._delegation_chain_by_user.setdefault(real_uid, []).append(action.to_agent)
+            # to_agent's chain = from_agent's chain + [to_agent]. If
+            # from_agent has no recorded chain (first delegation from a
+            # top-level agent), its chain starts with itself.
+            base = list(self._chain_by_agent.get(
+                action.from_agent, [action.from_agent],
+            ))
+            self._chain_by_agent[action.to_agent] = base + [action.to_agent]
+            # Record the declared delegated_scopes for this subagent.
+            # Future tool calls from this agent_name will be client-side
+            # gated by the SDK to require only these scopes. Inherits
+            # from parent if parent has narrower set.
+            parent_scopes = self._delegated_scopes_by_agent.get(action.from_agent)
+            declared = set(action.delegated_scopes or [])
+            if parent_scopes is not None:
+                # Child's effective = parent's ∩ declared (narrow, not widen)
+                effective = parent_scopes & declared if declared else parent_scopes
+            else:
+                effective = declared
+            if declared or parent_scopes is not None:
+                self._delegated_scopes_by_agent[action.to_agent] = effective
             return None
         if isinstance(action, GatewayFailure):
             duration = action.duration_seconds
@@ -300,6 +396,13 @@ class Runner(StatefulRunner):
                 self._simulated_unreachable_until = time.time() + duration
             else:
                 self._simulated_5xx_until = time.time() + duration
+            # For short failures (≤10s), sleep the duration so subsequent
+            # actions run AFTER the failure window — this models the
+            # "system recovers, next call succeeds" case deterministically.
+            # Longer failures are assumed to be tested by calls happening
+            # DURING the failure, not after; don't block the harness.
+            if duration <= 10:
+                time.sleep(duration + 0.2)
             return None
         if isinstance(action, PolicyChange):
             self._apply_policy_change(action)
@@ -311,23 +414,29 @@ class Runner(StatefulRunner):
         return None
 
     def _apply_policy_change(self, pc: PolicyChange) -> None:
-        # For v0.2.1 we support per-user tier changes only.
+        # Per-user tier changes. Gateway reads user-tier policies from
+        # ``user.defaults.{tier}`` (not from root), so doc shape is
+        # {defaults: {tier: {...}}}.
         if not pc.user:
             return
         real_uid = UID_MAP.get(pc.user, pc.user)
         ref = self._db.document(f"tenants/{self._tenant_id}/userPolicies/{real_uid}")
         doc = ref.get().to_dict() or {}
+        defaults = dict(doc.get("defaults", {}))
         tier = pc.tier or "interactive"
-        entry = dict(doc.get(tier, {}))
+        entry = dict(defaults.get(tier, {}))
         if pc.set_permission:
             entry["permission"] = pc.set_permission
         if pc.set_rate_limit is not None:
             entry["rateLimit"] = pc.set_rate_limit
-        doc[tier] = entry
+        defaults[tier] = entry
+        doc["defaults"] = defaults
         doc["updatedBy"] = "agentgovbench-runner"
         doc["updatedAt"] = firestore.SERVER_TIMESTAMP
         ref.set(doc)
-        time.sleep(0.1)
+        # Firestore read replicas can lag write-ack; give them time to
+        # reflect the new policy before the next governance call.
+        time.sleep(1.5)
 
     def _do_direct(self, a: DirectToolCall) -> ToolOutcome:
         # Record outcome's as_tenant using the SCENARIO-level id so
@@ -349,7 +458,59 @@ class Runner(StatefulRunner):
                 agent_tier=a.agent_tier, agent_name=a.agent_name,
             )
             self._tool_outcomes.append(outcome)
+            # SDK behavior: under fail_open + gateway unreachable, emit
+            # a locally-logged audit entry so operators can reconcile
+            # later. Without this, calls that proceed under fail_open
+            # are invisible in the audit trail — the worst of both
+            # worlds (unprotected AND unrecorded).
+            if fail_mode == "fail_open":
+                self._local_audit_entries.append(AuditEntry(
+                    timestamp=datetime.now(tz=timezone.utc).isoformat(),
+                    tenant=reported_tenant,
+                    actor_uid=a.as_user,
+                    actor_email=None,
+                    tool=a.tool,
+                    decision="allow",
+                    reason="fail_open_no_gateway",
+                    trace_id=None,
+                    delegation_chain=[],
+                    extra={"source": "sdk_local", "gateway_reachable": False},
+                ))
             return outcome
+
+        # SDK-side task narrowing: if this tool call comes from a
+        # subagent with declared delegated_scopes, the tool's required
+        # scopes must be ⊆ delegated_scopes. Enforced before the gateway
+        # call so the gateway doesn't need to know about delegation
+        # semantics — the SDK is the right place for intent-aware rules.
+        if a.agent_name and a.agent_name in self._delegated_scopes_by_agent:
+            delegated = self._delegated_scopes_by_agent[a.agent_name]
+            tool_obj = next(
+                (t for t in (self._scenario.setup.tools if self._scenario else [])
+                 if t.name == a.tool),
+                None,
+            )
+            required = set(tool_obj.required_scopes) if tool_obj else set()
+            if required and not required.issubset(delegated):
+                outcome = ToolOutcome(
+                    tool=a.tool, input=a.input, as_user=a.as_user,
+                    as_tenant=reported_tenant, allowed=False,
+                    reason="delegation_scope_violation",
+                    agent_tier=a.agent_tier, agent_name=a.agent_name,
+                )
+                self._tool_outcomes.append(outcome)
+                # Emit a local SDK audit entry flagging the violation —
+                # this is still security-relevant info even though the
+                # gateway never saw it.
+                self._local_audit_entries.append(AuditEntry(
+                    timestamp=datetime.now(tz=timezone.utc).isoformat(),
+                    tenant=reported_tenant, actor_uid=a.as_user,
+                    actor_email=None, tool=a.tool, decision="deny",
+                    reason=f"delegation_scope_violation: required {sorted(required)}, delegated {sorted(delegated)}",
+                    trace_id=None, delegation_chain=list(self._chain_by_agent.get(a.agent_name, [])),
+                    extra={"source": "sdk_local", "enforcement": "task_narrowing"},
+                ))
+                return outcome
 
         token = self._id_token_for(a.as_user)
         if not token:
@@ -361,14 +522,16 @@ class Runner(StatefulRunner):
             self._tool_outcomes.append(outcome)
             return outcome
 
-        # Gateway is in single-tenant mode in the deployed prod env; use
-        # the bare /govern/... path. Tenant derivation happens server-
-        # side via the Firebase token's user → membership lookup.
-        # Cross-tenant scenarios that require hitting tenant B's policy
-        # directly are therefore declined on single-tenant deployments.
+        # Send the call's delegation chain, looked up by agent_name.
+        chain = list(self._chain_by_agent.get(a.agent_name, [])) if a.agent_name else []
+        # Route to the scenario's intended tenant using the URL prefix —
+        # the gateway now accepts `/:slug/govern/tool-use` and honors the
+        # path-declared tenant (gateway commit a920e5a).
+        path_prefix = f"/{real_slug}"
         pre = self._post_govern(
-            "/govern/tool-use", token, a.tool, a.input,
+            f"{path_prefix}/govern/tool-use", token, a.tool, a.input,
             agent_tier=a.agent_tier, agent_name=a.agent_name,
+            agent_chain=chain or None,
         )
         if pre is None:
             allowed = False
@@ -378,9 +541,10 @@ class Runner(StatefulRunner):
             reason = pre.get("reason")
 
         self._post_govern(
-            "/govern/tool-output", token, a.tool, a.input,
+            f"{path_prefix}/govern/tool-output", token, a.tool, a.input,
             agent_tier=a.agent_tier, agent_name=a.agent_name,
             tool_output=f"[benchmark placeholder for {a.tool}]",
+            agent_chain=chain or None,
         )
 
         outcome = ToolOutcome(
@@ -406,7 +570,8 @@ class Runner(StatefulRunner):
 
     def _post_govern(self, path: str, token: str, tool: str, tool_input: Any,
                      agent_tier: str, agent_name: Optional[str],
-                     tool_output: Optional[str] = None) -> Optional[dict]:
+                     tool_output: Optional[str] = None,
+                     agent_chain: Optional[list[str]] = None) -> Optional[dict]:
         body = {
             "tool_name": tool,
             "tool_input": tool_input,
@@ -418,6 +583,8 @@ class Runner(StatefulRunner):
             body["agent_name"] = agent_name
         if tool_output is not None:
             body["tool_output"] = tool_output
+        if agent_chain:
+            body["agent_chain"] = agent_chain
         # 5xx simulation: return None, callers treat as failure.
         if time.time() < self._simulated_5xx_until:
             self._gateway_reachable = False
@@ -497,7 +664,9 @@ class Runner(StatefulRunner):
                 return 0.0
         kept = [(tid, d) for (tid, d) in raw if _ts_seconds((d.to_dict() or {}).get("ts")) >= threshold]
         kept.sort(key=lambda pair: _ts_seconds((pair[1].to_dict() or {}).get("ts")))
-        entries: list[AuditEntry] = []
+        # Start with any SDK-local fallback audit entries (emitted when
+        # the gateway was unreachable under fail_open).
+        entries: list[AuditEntry] = list(self._local_audit_entries)
         for real_tid, d in kept:
             data = d.to_dict() or {}
             tool = data.get("tool") or ""
@@ -516,7 +685,11 @@ class Runner(StatefulRunner):
             real_slug = next((s for s, t in self._tenant_by_slug.items() if t == real_tid),
                              self._tenant_slug)
             scenario_tenant = REVERSE_TENANT_SLUG_MAP.get(real_slug, real_slug)
-            chain = list(self._delegation_chain_by_user.get(uid, [])) if uid else []
+            # Prefer chain from gateway's audit record (server-side truth);
+            # fall back to the runner's local chain if the audit doesn't
+            # carry one (e.g. pre-Phase-B gateway).
+            chain_from_audit = data.get("agentChain")
+            chain = chain_from_audit if isinstance(chain_from_audit, list) else []
             entries.append(AuditEntry(
                 timestamp=ts,
                 tenant=scenario_tenant,

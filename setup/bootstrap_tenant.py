@@ -1,19 +1,30 @@
-"""One-time bootstrap: create a dedicated benchmark tenant in Firestore,
+"""One-time bootstrap: create two dedicated benchmark tenants in Firestore,
 create synthetic Firebase users, attach them as tenant members.
 
 Idempotent — rerunning reuses existing records.
 
-Usage:
+TO USE AGAINST YOUR OWN ACP DEPLOYMENT:
+
+    # 1. Download a Firebase service account JSON with admin rights on
+    #    the ACP project you want to benchmark.
+    export GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
+
+    # 2. (optional) Point at a different GCP project + email domain:
+    export AGB_PROJECT=your-firebase-project-id
+    export AGB_EMAIL_DOMAIN=agentgovbench.yourdomain.com
+
+    # 3. Bootstrap:
     python setup/bootstrap_tenant.py
 
-Requires:
-    GOOGLE_APPLICATION_CREDENTIALS env or hardcoded path to a Firebase
-    service account JSON with admin rights on the gatewaystack-connect
-    project.
+    # 4. Run the benchmark:
+    export AGB_TENANT_ID=<printed by step 3>
+    export AGB_TENANT_SLUG=<printed by step 3>
+    export FIREBASE_WEB_API_KEY=<your project's web API key>
+    python -m benchmark.cli run --runner acp
 
 Emits:
-    setup/benchmark_env.yaml — tenant_id, user_uids, tenant_slug. The
-    live ACP runner consumes this at startup.
+    setup/benchmark_env.yaml — tenant_ids, user_uids, tenant_slugs.
+    The live ACP runner consumes this on startup.
 """
 from __future__ import annotations
 
@@ -22,29 +33,27 @@ import sys
 import time
 from pathlib import Path
 
-# Defaults — override via env if pointing at a different GCP project.
-DEFAULT_CREDS = "/Users/dev/dev/gatewaystack-connect/secrets/gatewaystack-connect-891514f0c67f.json"
-DEFAULT_PROJECT = "gatewaystack-connect"
+# Defaults — override via env when pointing at a different project.
+DEFAULT_CREDS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+DEFAULT_PROJECT = os.environ.get("AGB_PROJECT", "gatewaystack-connect")
+EMAIL_DOMAIN = os.environ.get("AGB_EMAIL_DOMAIN", "agentgovbench.test")
+
 TENANTS = [
     {
         "slug": "agentgovbench",
         "name": "AgentGovBench tenant A",
         "users": [
-            {"uid": "agb-alice",  "email": "alice@agentgovbench.test",  "role": "member"},
-            {"uid": "agb-bob",    "email": "bob@agentgovbench.test",    "role": "admin"},
-            {"uid": "agb-carol",  "email": "carol@agentgovbench.test",  "role": "viewer"},
+            {"uid": "agb-alice",  "email": f"alice@{EMAIL_DOMAIN}",  "role": "member"},
+            {"uid": "agb-bob",    "email": f"bob@{EMAIL_DOMAIN}",    "role": "admin"},
+            {"uid": "agb-carol",  "email": f"carol@{EMAIL_DOMAIN}",  "role": "viewer"},
         ],
     },
     {
         "slug": "agentgovbench-b",
         "name": "AgentGovBench tenant B",
         "users": [
-            # alice-at-a is a member of tenant A only; we keep agb-alice
-            # as her single identity and attach her to both tenants only
-            # when a scenario needs her in both. By default, tenant-b's
-            # users are distinct real Firebase users.
-            {"uid": "agb-dan",  "email": "dan@agentgovbench.test",  "role": "member"},
-            {"uid": "agb-eve",  "email": "eve@agentgovbench.test",  "role": "admin"},
+            {"uid": "agb-dan",  "email": f"dan@{EMAIL_DOMAIN}",  "role": "member"},
+            {"uid": "agb-eve",  "email": f"eve@{EMAIL_DOMAIN}",  "role": "admin"},
         ],
     },
 ]
@@ -52,6 +61,15 @@ TENANTS = [
 
 def main() -> int:
     if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        if not DEFAULT_CREDS:
+            print(
+                "GOOGLE_APPLICATION_CREDENTIALS not set. Point it at a Firebase "
+                "service account JSON with admin rights on the ACP project "
+                "you want to benchmark, then rerun. Header of this file has "
+                "full setup docs.",
+                file=sys.stderr,
+            )
+            return 1
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = DEFAULT_CREDS
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", DEFAULT_PROJECT)
 

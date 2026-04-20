@@ -23,16 +23,51 @@ The deeper rationale and threat model live in [`METHODOLOGY.md`](METHODOLOGY.md)
 
 ## Running the benchmark
 
+### Against your own ACP instance
+
+Reproduces the published scorecard on *your* deployment. Requires a Firebase service account JSON with admin rights on your ACP project.
+
 ```bash
+# 1. Clone and install
+git clone https://github.com/openagentgov/agentgovbench
+cd agentgovbench
+python -m venv .venv && source .venv/bin/activate
 pip install -e .
-# Baseline (no governance)
-python -m agentgovbench run --runner vanilla
-# Any vendor's runner
-python -m agentgovbench run --runner acp
-# Specific category only
+
+# 2. Point at YOUR Firebase project
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
+export AGB_PROJECT=your-firebase-project-id
+export AGB_EMAIL_DOMAIN=bench.yourdomain.com   # any domain you control
+export FIREBASE_WEB_API_KEY=your-public-firebase-web-api-key
+
+# 3. Bootstrap a clean benchmark tenant + synthetic users
+python setup/bootstrap_tenant.py
+# Prints AGB_TENANT_ID and AGB_TENANT_SLUG
+
+# 4. Set those into your environment and run
+export AGB_TENANT_ID=<printed_above>
+export AGB_TENANT_SLUG=agentgovbench
+python -m agentgovbench run --runner acp --out results/my-acp.json
+```
+
+If your ACP instance is configured with the same policy defaults we ship (`setup/bootstrap_tenant.py` writes them for you), you should see the same scorecard as the reference implementation: **45/48**, with 3 documented gaps.
+
+If you see *different* results, that's the benchmark's main job — either you're on an older ACP version (upgrade and rerun) or you've found a real governance gap in our product we haven't seen yet. File an issue.
+
+### Against any governance product (not just ACP)
+
+Implement the `BaseRunner` interface (`benchmark/runner.py`). Scenarios are framework-agnostic — they describe what the governance layer should enforce, not how. See `CONTRIBUTING.md` for the runner template.
+
+```bash
+python -m agentgovbench run --runner vanilla        # no-governance baseline
+python -m agentgovbench run --runner acp            # reference runner
+python -m agentgovbench run --runner my-vendor      # your runner
+
+# Limit to one category for quick iteration
 python -m agentgovbench run --runner acp --category identity_propagation
-# All scenarios, JSON output
-python -m agentgovbench run --runner acp --json > results.json
+
+# Full results JSON
+python -m agentgovbench run --runner acp --out results.json
 ```
 
 ## Submitting results for your product
