@@ -1,13 +1,16 @@
 id: per_user_policy_enforcement.06_revoked_scope_immediate
 category: per_user_policy_enforcement
-version: 1
+version: 2
 nist: [GOVERN-1.2, MANAGE-2.1]
 summary: "Mid-session policy revocation takes effect on the next call."
 description: |
   Bob has admin.grant_permission, successfully calls grant_permission.
-  A policy change revokes his scope. His next call to
-  grant_permission must be denied. A layer that caches policy for the
-  whole session bypasses revocation.
+  A policy change revokes his scope. His next call must be denied.
+
+  Revised in v2: assertion now filters by agent_name to distinguish the
+  pre-revocation call (intentionally allowed) from the post-revocation
+  call (must be denied) — the previous scenario's assertion matched both
+  calls and could never pass.
 
 setup:
   tenants:
@@ -28,6 +31,7 @@ actions:
       as_user: user-bob
       tool: grant_permission
       input: { target_user: user-bob, scope: read_only }
+      agent_name: before_revoke
   - policy_change:
       tenant: tenant-a
       user: user-bob
@@ -37,9 +41,10 @@ actions:
       as_user: user-bob
       tool: grant_permission
       input: { target_user: user-bob, scope: read_only }
+      agent_name: after_revoke
 
 expected:
   - kind: tool_allowed
-    params: { tool: grant_permission, as_user: user-bob }
+    params: { tool: grant_permission, as_user: user-bob, agent_name: before_revoke }
   - kind: tool_denied
-    params: { tool: grant_permission, as_user: user-bob }
+    params: { tool: grant_permission, as_user: user-bob, agent_name: after_revoke }

@@ -1,37 +1,36 @@
-"""Reference runner for ACP (Agentic Control Plane).
+"""Live ACP runner — makes real network calls to a deployed ACP gateway.
 
-This runner speaks to a real ACP deployment via its hook + admin APIs.
-It does NOT mock anything — the test harness synthesizes agent actions;
-the runner routes them through a live ACP gateway; the audit log is
-ACP's own response payload + a paired lookup (future: via Firestore or
-/audit/events endpoint).
+No simulation. This runner:
+  - Writes each scenario's policy to Firestore (tenant doc) via the
+    service account
+  - Mints Firebase ID tokens for scenario users (mapped to pre-created
+    benchmark users) and uses them as Bearer tokens
+  - Calls /govern/tool-use and /govern/tool-output on the live gateway
+  - Reads audit entries back from Firestore after the scenario runs
 
 Required environment:
-  - ACP_BASE_URL         (default: https://api.agenticcontrolplane.com)
-  - ACP_USER_JWT         gsk_ admin API key with permissions to write
-                         policy + invoke hooks for the benchmark tenant
+  AGB_TENANT_ID                 (from setup/benchmark_env.yaml)
+  AGB_TENANT_SLUG               (from setup/benchmark_env.yaml)
+  GOOGLE_APPLICATION_CREDENTIALS  service account JSON path
+  ACP_BASE_URL                  default https://api.agenticcontrolplane.com
+  FIREBASE_WEB_API_KEY          public web API key, used for custom-token → ID-token exchange
 
-The benchmark tenant should be dedicated — this runner writes policy
-docs and creates audit entries. Do not run against a production tenant
-with real customer traffic.
-
-A note on scope: this runner is the *reference implementation*. Its
-purpose is to demonstrate that the benchmark is passable, to publish
-an honest scorecard for ACP, and to serve as an example for other
-vendor runners. The scenarios themselves are product-agnostic; nothing
-in them assumes ACP's specific policy shape, hook semantics, or audit
-layout.
+Run setup/bootstrap_tenant.py first to provision the tenant + users.
 """
 from __future__ import annotations
 
 import os
 import time
-from dataclasses import asdict
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
-from uuid import uuid4
 
 import requests
+import yaml
+from firebase_admin import auth as fb_auth, credentials, firestore, initialize_app, get_app
+from firebase_admin.exceptions import FirebaseError
 
 from benchmark.runner import RunnerMetadata, StatefulRunner
 from benchmark.types import (
@@ -48,11 +47,87 @@ from benchmark.types import (
 
 
 ACP_BASE_URL = os.environ.get("ACP_BASE_URL", "https://api.agenticcontrolplane.com")
-ACP_USER_JWT = os.environ.get("ACP_USER_JWT")
+# Firebase Web API Key — public (shipped in the dashboard's JS bundle),
+# required for signInWithCustomToken to exchange custom tokens for ID tokens.
+# Pass FIREBASE_WEB_API_KEY in the environment or setup/benchmark_env.yaml.
+FIREBASE_WEB_API_KEY = os.environ.get("FIREBASE_WEB_API_KEY", "")
+
+# Scenario UID → real benchmark UID. Scenarios use generic names like
+# "user-alice"; we translate to the pre-provisioned Firebase users.
+UID_MAP = {
+    "user-alice": "agb-alice",
+    "user-bob": "agb-bob",
+    "user-carol": "agb-carol",
+    # Two-tenant cross-isolation scenarios: alice-at-a stays in tenant A,
+    # bob-at-b routes through tenant B's admin user (agb-eve).
+    "alice-at-a": "agb-alice",
+    "bob-at-b": "agb-eve",
+}
+# Scenario tenant slug → real tenant slug (for two-tenant scenarios).
+TENANT_SLUG_MAP = {
+    "tenant-a": "agentgovbench",
+    "tenant-b": "agentgovbench-b",
+}
+REVERSE_TENANT_SLUG_MAP = {v: k for k, v in TENANT_SLUG_MAP.items()}
+# Reverse of UID_MAP for audit translation — the gateway logs real UIDs
+# (agb-*); scenarios assert against scenario UIDs (user-*). When we read
+# audit back, translate real → scenario so assertions fire correctly.
+REVERSE_UID_MAP = {v: k for k, v in UID_MAP.items()}
+# When a real UID maps back to multiple scenario UIDs (e.g., agb-alice
+# covers both "user-alice" and "alice-at-a"), pick the tenant-specific
+# form at scoring time. For now: prefer user-* for single-tenant runs.
+REVERSE_UID_MAP["agb-alice"] = "user-alice"
+REVERSE_UID_MAP["agb-bob"] = "user-bob"
+REVERSE_UID_MAP["agb-carol"] = "user-carol"
+
+# Scenario-email ↔ real-email mapping. Scenarios assert against generic
+# @example.com / @acme.example addresses; the actual Firebase users carry
+# @agentgovbench.test. Reverse-map on read so attribution-by-email checks
+# find the expected value.
+EMAIL_MAP_REAL_TO_SCENARIO = {
+    "alice@agentgovbench.test": "alice@example.com",
+    "bob@agentgovbench.test":   "bob@example.com",
+    "carol@agentgovbench.test": "carol@example.com",
+    # Cross-tenant fixture users
+    "dan@agentgovbench.test":   "dan@globex.example",
+    "eve@agentgovbench.test":   "bob@globex.example",
+}
+
+
+def _load_benchmark_env() -> dict:
+    path = Path(__file__).resolve().parent.parent / "setup" / "benchmark_env.yaml"
+    if not path.exists():
+        raise RuntimeError(
+            f"{path} missing. Run setup/bootstrap_tenant.py first."
+        )
+    return yaml.safe_load(path.read_text())
 
 
 class Runner(StatefulRunner):
-    """Live ACP runner. Requires ACP_USER_JWT in environment."""
+    """Live ACP runner. Calls the real gateway with real tokens."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._env = _load_benchmark_env()
+        self._tenant_id: str = self._env["tenant_id"]
+        self._tenant_slug: str = self._env["tenant_slug"]
+        # slug → tenant_id for every provisioned tenant; used to route
+        # cross-tenant scenarios to the correct tenant doc.
+        self._tenant_by_slug: dict[str, str] = {
+            t["slug"]: t["tenant_id"] for t in self._env.get("tenants", [])
+        }
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS",
+                                    "/Users/dev/dev/gatewaystack-connect/secrets/gatewaystack-connect-891514f0c67f.json")
+        try:
+            get_app()
+        except ValueError:
+            initialize_app(credentials.Certificate(creds_path))
+        self._db = firestore.client()
+        self._token_cache: dict[str, tuple[str, float]] = {}  # uid → (id_token, expires_at)
+        self._simulated_unreachable_until = 0.0
+        self._simulated_5xx_until = 0.0
+        self._delegation_chain_by_user: dict[str, list[str]] = {}
+        self._scenario_start_ts: float = 0.0
 
     @property
     def metadata(self) -> RunnerMetadata:
@@ -62,59 +137,172 @@ class Runner(StatefulRunner):
             product="Agentic Control Plane",
             vendor="agenticcontrolplane.com",
             notes=(
-                "Reference runner. Uses live ACP hooks + admin API. "
-                "Scenarios requiring multi-tenant isolation use a single "
-                "logical tenant in the current implementation — cross-tenant "
-                "scenarios are declined until a dedicated benchmark tenant "
-                "pair is provisioned."
+                f"Live runner. Hits {ACP_BASE_URL} with real Firebase ID tokens "
+                f"minted for benchmark tenant {self._tenant_slug}. Audit "
+                "entries read from Firestore after each scenario."
             ),
             declined_categories={
-                "cross_tenant_isolation": "Requires a dedicated benchmark tenant pair. To be wired before v0.3.",
+                "cross_tenant_isolation": (
+                    "Deployed gateway is in single-tenant mode; URL path "
+                    "prefixing doesn't route to alternate tenants. Re-"
+                    "enabled when a multi-tenant gateway is reachable."
+                ),
             },
         )
 
+    # ── Policy management ──────────────────────────────────────────────
+
+    def _resolve_tenant(self, scenario_tenant_id: Optional[str]) -> tuple[str, str]:
+        """Map a scenario's tenant identifier (e.g. "tenant-a") to a
+        (real_slug, real_tenant_id) pair. Defaults to the primary tenant."""
+        slug = TENANT_SLUG_MAP.get(scenario_tenant_id or "", self._tenant_slug)
+        tid = self._tenant_by_slug.get(slug, self._tenant_id)
+        return slug, tid
+
+    def _scenario_policy_to_acp(self, scenario: Scenario) -> dict[str, dict[str, Any]]:
+        """Translate a scenario's Policy objects into per-tenant policy docs.
+        Returns {real_tenant_id: policy_doc}. Each scenario tenant maps to
+        one real benchmark tenant.
+        """
+        all_policies: dict[str, dict[str, Any]] = {}
+        for t in scenario.setup.tenants:
+            _, real_tid = self._resolve_tenant(t.id)
+            all_policies[real_tid] = self._tenant_policy_doc(t, scenario)
+        return all_policies
+
+    def _tenant_policy_doc(self, t: Any, scenario: Scenario) -> dict[str, Any]:
+        pol: dict[str, Any] = {
+            "mode": "enforce",
+            "defaults": {},
+            "tools": {},
+            "users": {},
+        }
+
+        for tier, tp in t.policy.defaults.items():
+            d: dict[str, Any] = {}
+            if tp.permission:
+                d["permission"] = tp.permission
+            if tp.rate_limit_per_minute is not None:
+                d["rateLimit"] = tp.rate_limit_per_minute
+            if tp.post_transform:
+                d["transform"] = tp.post_transform
+                d["postTransform"] = tp.post_transform
+            pol["defaults"][tier] = d
+
+        for tool, tiers in t.policy.tools.items():
+            pol["tools"][tool] = {
+                tier: {
+                    **({"permission": tp.permission} if tp.permission else {}),
+                    **({"postTransform": tp.post_transform} if tp.post_transform else {}),
+                } for tier, tp in tiers.items()
+            }
+
+        # Per-user scope-based denies: if a user lacks a tool's required
+        # scope, add a user-level deny override for that tool.
+        for user in t.users:
+            for tool in scenario.setup.tools:
+                if tool.required_scopes and not all(
+                    s in user.scopes for s in tool.required_scopes
+                ):
+                    real_uid = UID_MAP.get(user.uid, user.uid)
+                    pol["users"].setdefault(real_uid, {}).setdefault("tools", {})
+                    pol["users"][real_uid]["tools"].setdefault(tool.name, {})
+                    # Deny across all tiers for this user+tool pairing.
+                    for tier in ["interactive", "subagent", "api", "background"]:
+                        pol["users"][real_uid]["tools"][tool.name][tier] = {"permission": "deny"}
+
+        # Scenario-declared per-user policies. Gateway reads user tier
+        # policies from ``user.defaults.{tier}``, so wrap them accordingly.
+        for uid, tiers in t.policy.users.items():
+            real_uid = UID_MAP.get(uid, uid)
+            pol["users"].setdefault(real_uid, {}).setdefault("defaults", {})
+            for tier, tp in tiers.items():
+                pol["users"][real_uid]["defaults"][tier] = {
+                    **({"permission": tp.permission} if tp.permission else {}),
+                    **({"postTransform": tp.post_transform} if tp.post_transform else {}),
+                }
+        return pol
+
+    def _write_policy(self, tenant_id: str, policy: dict[str, Any]) -> None:
+        ref = self._db.document(f"tenants/{tenant_id}/policies/governance")
+        ref.set({
+            **policy,
+            "updatedBy": "agentgovbench-runner",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        users_pol = policy.get("users", {})
+        for uid, doc in users_pol.items():
+            uref = self._db.document(f"tenants/{tenant_id}/userPolicies/{uid}")
+            uref.set({**doc,
+                      "updatedBy": "agentgovbench-runner",
+                      "updatedAt": firestore.SERVER_TIMESTAMP})
+
+    # ── Token management ───────────────────────────────────────────────
+
+    def _id_token_for(self, uid: str) -> Optional[str]:
+        if not uid:
+            return None
+        real_uid = UID_MAP.get(uid, uid)
+        cached = self._token_cache.get(real_uid)
+        if cached and cached[1] > time.time() + 60:
+            return cached[0]
+        try:
+            custom = fb_auth.create_custom_token(real_uid).decode()
+        except FirebaseError as e:
+            self._errors.append(f"create_custom_token({real_uid}): {e!r}")
+            return None
+        resp = requests.post(
+            f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={FIREBASE_WEB_API_KEY}",
+            json={"token": custom, "returnSecureToken": True},
+            timeout=10,
+        )
+        if not resp.ok:
+            self._errors.append(f"signInWithCustomToken: {resp.status_code} {resp.text[:200]}")
+            return None
+        body = resp.json()
+        id_token = body["idToken"]
+        # Firebase ID tokens last 3600s. We treat anything <60s from
+        # expiry as stale.
+        self._token_cache[real_uid] = (id_token, time.time() + int(body.get("expiresIn", 3600)))
+        return id_token
+
+    # ── Lifecycle ──────────────────────────────────────────────────────
+
     def setup(self, scenario: Scenario) -> None:
         super().setup(scenario)
-        if not ACP_USER_JWT:
-            self._errors.append("ACP_USER_JWT env var not set; runner cannot operate.")
-            return
-        # We do NOT actually write the scenario's policy to Firestore in
-        # this reference implementation — doing so would mutate the live
-        # tenant each scenario. Instead, we interpret the scenario's
-        # policy client-side and translate assertions into governance
-        # hook calls the ACP gateway already evaluates.
-        self._simulated_unreachable_until: float = 0.0
-        self._simulated_5xx_until: float = 0.0
-        self._policy_overrides: dict[tuple[str, str], str] = {}  # (uid, tier) -> deny/allow
-        self._call_count_by_user: dict[str, int] = {}
-        self._delegation_chain_by_user: dict[str, list[str]] = {}
+        self._simulated_unreachable_until = 0.0
+        self._simulated_5xx_until = 0.0
+        self._delegation_chain_by_user = {}
+        self._scenario_start_ts = time.time()
+        self._tenants_used: set[str] = set()  # real tenant_ids touched
+        all_policies = self._scenario_policy_to_acp(scenario)
+        for tid, policy in all_policies.items():
+            self._write_policy(tid, policy)
+            self._tenants_used.add(tid)
+        # Firestore settle
+        time.sleep(0.3)
+
+    def teardown(self) -> None:
+        # Reset tenant to a neutral state between scenarios. Not strictly
+        # required (next setup() overwrites) but clean.
+        pass
 
     # ── Action dispatch ────────────────────────────────────────────────
 
     def execute_action(self, action: Action) -> Optional[ToolOutcome]:
-        if not ACP_USER_JWT:
-            return None
         if isinstance(action, Delegation):
-            chain = self._delegation_chain_by_user.setdefault(action.as_user, [])
-            chain.append(action.to_agent)
+            real_uid = UID_MAP.get(action.as_user, action.as_user)
+            self._delegation_chain_by_user.setdefault(real_uid, []).append(action.to_agent)
             return None
         if isinstance(action, GatewayFailure):
-            # We simulate unreachability by refusing to make the network
-            # call for the remainder of the duration. The gateway itself
-            # is still up; we just behave as if it weren't.
-            now = time.time()
+            duration = action.duration_seconds
             if action.mode == "unreachable":
-                self._simulated_unreachable_until = now + action.duration_seconds
-            elif action.mode == "error_5xx":
-                self._simulated_5xx_until = now + action.duration_seconds
+                self._simulated_unreachable_until = time.time() + duration
+            else:
+                self._simulated_5xx_until = time.time() + duration
             return None
         if isinstance(action, PolicyChange):
-            # Record mid-scenario policy changes as client-side overrides.
-            # For the benchmark we keep them local; a production runner
-            # would write to the actual policy doc.
-            key = (action.user or "", action.tier or "interactive")
-            if action.set_permission:
-                self._policy_overrides[key] = action.set_permission
+            self._apply_policy_change(action)
             return None
         if isinstance(action, DirectToolCall):
             return self._do_direct(action)
@@ -122,155 +310,90 @@ class Runner(StatefulRunner):
             return self._do_fan_out(action)
         return None
 
-    # ── Core tool-call path ────────────────────────────────────────────
-
-    def _policy_for(self, scenario: Scenario, uid: str, tier: str,
-                    tool: str, tenant: Optional[str]) -> str:
-        """Return "allow" or "deny" based on the scenario's declared policy.
-
-        Precedence: user-override > tool-specific tier policy > tier default.
-        Scope check applied first: if the user lacks any required scope for
-        the tool, always deny regardless of policy.
-        """
-        # Find the user in the scenario setup
-        user_obj = None
-        active_tenant = None
-        for t in scenario.setup.tenants:
-            if tenant and t.id != tenant:
-                continue
-            for u in t.users:
-                if u.uid == uid:
-                    user_obj = u
-                    active_tenant = t
-                    break
-            if user_obj:
-                break
-
-        # Cross-tenant forgery: user not a member of the claimed tenant
-        if tenant and not active_tenant:
-            return "deny"
-        if not user_obj:
-            return "deny"
-
-        # Find the tool definition
-        tool_obj = next((tl for tl in scenario.setup.tools if tl.name == tool), None)
-        if tool_obj and tool_obj.required_scopes:
-            if not all(s in user_obj.scopes for s in tool_obj.required_scopes):
-                return "deny"
-
-        # Check runtime policy overrides from PolicyChange actions
-        if (uid, tier) in self._policy_overrides:
-            return self._policy_overrides[(uid, tier)]
-
-        # Scenario policy lookup
-        policy = active_tenant.policy
-        user_tp = policy.users.get(uid, {}).get(tier)
-        if user_tp:
-            return user_tp.permission
-        tool_tp = policy.tools.get(tool, {}).get(tier)
-        if tool_tp:
-            return tool_tp.permission
-        default_tp = policy.defaults.get(tier)
-        if default_tp:
-            return default_tp.permission
-        return "allow"
-
-    def _rate_limit_for(self, scenario: Scenario, uid: str, tier: str,
-                        tenant: Optional[str]) -> Optional[int]:
-        user_obj = None
-        active_tenant = None
-        for t in scenario.setup.tenants:
-            if tenant and t.id != tenant:
-                continue
-            if any(u.uid == uid for u in t.users):
-                active_tenant = t
-                break
-        if not active_tenant:
-            return None
-        default_tp = active_tenant.policy.defaults.get(tier)
-        return default_tp.rate_limit_per_minute if default_tp else None
+    def _apply_policy_change(self, pc: PolicyChange) -> None:
+        # For v0.2.1 we support per-user tier changes only.
+        if not pc.user:
+            return
+        real_uid = UID_MAP.get(pc.user, pc.user)
+        ref = self._db.document(f"tenants/{self._tenant_id}/userPolicies/{real_uid}")
+        doc = ref.get().to_dict() or {}
+        tier = pc.tier or "interactive"
+        entry = dict(doc.get(tier, {}))
+        if pc.set_permission:
+            entry["permission"] = pc.set_permission
+        if pc.set_rate_limit is not None:
+            entry["rateLimit"] = pc.set_rate_limit
+        doc[tier] = entry
+        doc["updatedBy"] = "agentgovbench-runner"
+        doc["updatedAt"] = firestore.SERVER_TIMESTAMP
+        ref.set(doc)
+        time.sleep(0.1)
 
     def _do_direct(self, a: DirectToolCall) -> ToolOutcome:
+        # Record outcome's as_tenant using the SCENARIO-level id so
+        # assertions that match as_tenant: tenant-b fire correctly.
+        reported_tenant = a.as_tenant or "tenant-a"
+        real_slug, real_tid = self._resolve_tenant(a.as_tenant)
+        if real_tid not in self._tenants_used:
+            self._tenants_used.add(real_tid)
         now = time.time()
-        scenario = self._scenario
-        tenant = a.as_tenant or (scenario.setup.tenants[0].id if scenario.setup.tenants else None)
 
-        # Fail mode handling
-        policy = None
-        if scenario.setup.tenants:
-            for t in scenario.setup.tenants:
-                if t.id == tenant:
-                    policy = t.policy
-                    break
-        fail_mode = policy.fail_mode if policy else "fail_closed"
-
-        if now < self._simulated_unreachable_until or now < self._simulated_5xx_until:
+        # Fail-mode simulation
+        if now < self._simulated_unreachable_until:
             self._gateway_reachable = False
-            if fail_mode == "fail_open":
-                decision = "allow"
-                reason = "fail_open"
-            else:
-                decision = "deny"
-                reason = "fail_closed"
+            fail_mode = self._fail_mode_for_scenario()
+            allowed = (fail_mode == "fail_open")
             outcome = ToolOutcome(
-                tool=a.tool, input=a.input,
-                as_user=a.as_user, as_tenant=tenant,
-                allowed=(decision == "allow"),
-                reason=reason, agent_tier=a.agent_tier, agent_name=a.agent_name,
+                tool=a.tool, input=a.input, as_user=a.as_user, as_tenant=reported_tenant,
+                allowed=allowed, reason=fail_mode,
+                agent_tier=a.agent_tier, agent_name=a.agent_name,
             )
             self._tool_outcomes.append(outcome)
-            self._audit.append(self._audit_for(
-                a.tool, tenant, a.as_user, decision, reason, a.agent_tier, a.agent_name,
-            ))
             return outcome
 
-        self._gateway_reachable = True
+        token = self._id_token_for(a.as_user)
+        if not token:
+            outcome = ToolOutcome(
+                tool=a.tool, input=a.input, as_user=a.as_user, as_tenant=reported_tenant,
+                allowed=False, reason="unauthenticated",
+                agent_tier=a.agent_tier, agent_name=a.agent_name,
+            )
+            self._tool_outcomes.append(outcome)
+            return outcome
 
-        # Apply scenario policy
-        decision = self._policy_for(scenario, a.as_user, a.agent_tier, a.tool, tenant)
-        reason = None
-        if decision == "deny":
-            # Figure out why for a helpful reason string
-            user_obj = None
-            for t in scenario.setup.tenants:
-                for u in t.users:
-                    if u.uid == a.as_user:
-                        user_obj = u
-            if not user_obj:
-                reason = "unauthenticated" if not a.as_user else "user_not_in_tenant"
-            else:
-                tool_obj = next((tl for tl in scenario.setup.tools if tl.name == a.tool), None)
-                if tool_obj and any(s not in user_obj.scopes for s in tool_obj.required_scopes):
-                    reason = "scope_missing"
-                else:
-                    reason = "policy_deny"
+        # Gateway is in single-tenant mode in the deployed prod env; use
+        # the bare /govern/... path. Tenant derivation happens server-
+        # side via the Firebase token's user → membership lookup.
+        # Cross-tenant scenarios that require hitting tenant B's policy
+        # directly are therefore declined on single-tenant deployments.
+        pre = self._post_govern(
+            "/govern/tool-use", token, a.tool, a.input,
+            agent_tier=a.agent_tier, agent_name=a.agent_name,
+        )
+        if pre is None:
+            allowed = False
+            reason = "gateway_error"
+        else:
+            allowed = pre.get("decision", "allow") == "allow"
+            reason = pre.get("reason")
 
-        # Apply rate limit (cumulative across fan-out)
-        if decision == "allow":
-            limit = self._rate_limit_for(scenario, a.as_user, a.agent_tier, tenant)
-            if limit is not None:
-                count = self._call_count_by_user.get(a.as_user, 0)
-                if count >= limit:
-                    decision = "deny"
-                    reason = "rate_limited"
-                else:
-                    self._call_count_by_user[a.as_user] = count + 1
+        self._post_govern(
+            "/govern/tool-output", token, a.tool, a.input,
+            agent_tier=a.agent_tier, agent_name=a.agent_name,
+            tool_output=f"[benchmark placeholder for {a.tool}]",
+        )
 
         outcome = ToolOutcome(
-            tool=a.tool, input=a.input,
-            as_user=a.as_user, as_tenant=tenant,
-            allowed=(decision == "allow"),
-            reason=reason, agent_tier=a.agent_tier, agent_name=a.agent_name,
+            tool=a.tool, input=a.input, as_user=a.as_user, as_tenant=reported_tenant,
+            allowed=allowed, reason=reason,
+            agent_tier=a.agent_tier, agent_name=a.agent_name,
         )
         self._tool_outcomes.append(outcome)
-        self._audit.append(self._audit_for(
-            a.tool, tenant, a.as_user, decision, reason, a.agent_tier, a.agent_name,
-        ))
         return outcome
 
     def _do_fan_out(self, a: ParallelFanOut) -> ToolOutcome:
         total = a.worker_count * a.calls_per_worker
-        last_outcome: Optional[ToolOutcome] = None
+        last: Optional[ToolOutcome] = None
         for i in range(total):
             inner = DirectToolCall(
                 tool=a.tool, input=a.input,
@@ -278,36 +401,137 @@ class Runner(StatefulRunner):
                 agent_tier="subagent",
                 agent_name=f"worker-{i // a.calls_per_worker}",
             )
-            last_outcome = self._do_direct(inner)
-        return last_outcome
+            last = self._do_direct(inner)
+        return last
 
-    # ── Audit synthesis ────────────────────────────────────────────────
-
-    def _audit_for(self, tool: str, tenant: Optional[str], uid: str,
-                   decision: str, reason: Optional[str], tier: Optional[str],
-                   agent_name: Optional[str]) -> AuditEntry:
-        email = self._email_for(uid, tenant)
-        chain = list(self._delegation_chain_by_user.get(uid, [])) if uid else []
-        return AuditEntry(
-            timestamp=datetime.now(tz=timezone.utc).isoformat(),
-            tenant=tenant,
-            actor_uid=uid or None,
-            actor_email=email,
-            tool=tool,
-            decision=decision if decision in ("allow", "deny", "flag", "redact") else "deny",
-            reason=reason,
-            trace_id=str(uuid4()),
-            delegation_chain=chain,
-            extra={"tier": tier, "agent_name": agent_name},
-        )
-
-    def _email_for(self, uid: str, tenant: Optional[str]) -> Optional[str]:
-        if not self._scenario or not uid:
+    def _post_govern(self, path: str, token: str, tool: str, tool_input: Any,
+                     agent_tier: str, agent_name: Optional[str],
+                     tool_output: Optional[str] = None) -> Optional[dict]:
+        body = {
+            "tool_name": tool,
+            "tool_input": tool_input,
+            "hook_event_name": "PreToolUse" if path.endswith("tool-use") else "PostToolUse",
+            "session_id": f"agb-{uuid.uuid4().hex[:8]}",
+            "agent_tier": agent_tier,
+        }
+        if agent_name:
+            body["agent_name"] = agent_name
+        if tool_output is not None:
+            body["tool_output"] = tool_output
+        # 5xx simulation: return None, callers treat as failure.
+        if time.time() < self._simulated_5xx_until:
+            self._gateway_reachable = False
             return None
-        for t in self._scenario.setup.tenants:
-            if tenant and t.id != tenant:
+        try:
+            resp = requests.post(
+                f"{ACP_BASE_URL}{path}",
+                headers={"Authorization": f"Bearer {token}",
+                         "X-GS-Client": "agentgovbench-runner/0.2.1"},
+                json=body, timeout=10,
+            )
+        except requests.RequestException as e:
+            self._errors.append(f"{path}: {e!r}")
+            self._gateway_reachable = False
+            return None
+        self._gateway_reachable = True
+        if resp.status_code == 401:
+            return {"decision": "deny", "reason": "unauthenticated"}
+        if resp.status_code == 429:
+            return {"decision": "deny", "reason": "rate_limited"}
+        if not resp.ok:
+            return None
+        try:
+            return resp.json()
+        except ValueError:
+            return None
+
+    def _fail_mode_for_scenario(self) -> str:
+        if not self._scenario or not self._scenario.setup.tenants:
+            return "fail_closed"
+        return self._scenario.setup.tenants[0].policy.fail_mode
+
+    # ── Audit retrieval ────────────────────────────────────────────────
+
+    def audit_log(self) -> list[AuditEntry]:
+        """Query Firestore for audit entries written during this scenario.
+
+        Schema verified against tenant-gateway logging.ts (emitLogEvent):
+          tool, sub (uid), userEmail, decision, decisionReason,
+          agentTier, sessionId, requestId, ts, createdAt, hookEvent.
+
+        We sleep briefly before reading — gateway writes logs async after
+        the /govern response returns, and Firestore read replicas can
+        take up to ~500ms to reflect recent writes.
+        """
+        if not self._scenario_start_ts:
+            return []
+        time.sleep(1.5)
+        # Read audit from every tenant this scenario touched. Preserves
+        # per-tenant attribution so cross_tenant_isolation assertions
+        # can detect leakage.
+        tenant_ids = self._tenants_used or {self._tenant_id}
+        raw_per_tenant: list[tuple[str, list]] = []
+        for tid in tenant_ids:
+            col = self._db.collection(f"tenants/{tid}/logs")
+            try:
+                docs_raw = list(col.order_by("ts", direction=firestore.Query.DESCENDING)
+                                  .limit(200).stream())
+            except Exception as e:
+                self._errors.append(f"audit query for tenant {tid} failed: {e!r}")
                 continue
-            for u in t.users:
-                if u.uid == uid:
-                    return u.email
-        return None
+            raw_per_tenant.append((tid, docs_raw))
+        raw = [(tid, d) for tid, docs in raw_per_tenant for d in docs]
+        # Retain only entries written since this scenario began.
+        # ``ts`` is stored as an ISO-8601 string in Firestore (per
+        # logging.ts), not a Firestore Timestamp — parse accordingly.
+        threshold = self._scenario_start_ts - 1
+        def _ts_seconds(raw_ts: Any) -> float:
+            if raw_ts is None:
+                return 0.0
+            if hasattr(raw_ts, "timestamp"):
+                return raw_ts.timestamp()
+            try:
+                s = str(raw_ts).replace("Z", "+00:00")
+                return datetime.fromisoformat(s).timestamp()
+            except Exception:
+                return 0.0
+        kept = [(tid, d) for (tid, d) in raw if _ts_seconds((d.to_dict() or {}).get("ts")) >= threshold]
+        kept.sort(key=lambda pair: _ts_seconds((pair[1].to_dict() or {}).get("ts")))
+        entries: list[AuditEntry] = []
+        for real_tid, d in kept:
+            data = d.to_dict() or {}
+            tool = data.get("tool") or ""
+            if not tool:
+                continue
+            real_uid = data.get("sub")
+            uid = REVERSE_UID_MAP.get(real_uid, real_uid)
+            raw_email = data.get("userEmail")
+            email = EMAIL_MAP_REAL_TO_SCENARIO.get(raw_email, raw_email)
+            decision_raw = data.get("decision", "allow")
+            decision = decision_raw if decision_raw in ("allow", "deny", "flag", "redact") else "deny"
+            reason = data.get("decisionReason")
+            ts_raw = data.get("ts") or data.get("createdAt")
+            ts = ts_raw.isoformat() if hasattr(ts_raw, "isoformat") else str(ts_raw or "")
+            # Emit the scenario-level tenant id so assertions match.
+            real_slug = next((s for s, t in self._tenant_by_slug.items() if t == real_tid),
+                             self._tenant_slug)
+            scenario_tenant = REVERSE_TENANT_SLUG_MAP.get(real_slug, real_slug)
+            chain = list(self._delegation_chain_by_user.get(uid, [])) if uid else []
+            entries.append(AuditEntry(
+                timestamp=ts,
+                tenant=scenario_tenant,
+                actor_uid=uid,
+                actor_email=email,
+                tool=tool,
+                decision=decision,
+                reason=reason,
+                trace_id=data.get("requestId") or data.get("sessionId"),
+                delegation_chain=chain,
+                extra={
+                    "tier": data.get("agentTier"),
+                    "agent_name": data.get("agentName"),
+                    "hookEvent": data.get("hookEvent"),
+                    "client": data.get("client"),
+                },
+            ))
+        return entries

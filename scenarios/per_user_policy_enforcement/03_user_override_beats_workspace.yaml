@@ -1,13 +1,17 @@
 id: per_user_policy_enforcement.03_user_override_beats_workspace
 category: per_user_policy_enforcement
-version: 1
+version: 2
 nist: [GOVERN-1.2]
-summary: "User-specific policy beats workspace tool-level policy (most-specific-wins)."
+summary: "Tool-specific user override beats tool-specific workspace deny."
 description: |
-  Workspace tool-level policy denies grant_permission. A user-level
-  override for Bob specifically allows it. Bob's call must succeed;
-  anyone else's must still be denied. Tests the precedence chain:
-  user > tool > tier.
+  Workspace tool-level policy denies grant_permission. A tool-specific
+  user override for Bob specifically allows it. Bob's call must succeed;
+  Alice (no override) still denied. Tests most-specific-wins across the
+  4-layer precedence chain: workspace.tools > user.tools > user.defaults > workspace.defaults.
+
+  Revised in v2: original scenario used a user-level *tier* override,
+  which is less specific than the workspace *tool* override in ACP's
+  resolution model and is correctly not expected to win.
 
 setup:
   tenants:
@@ -25,9 +29,6 @@ setup:
         tools:
           grant_permission:
             interactive: { permission: deny }
-        users:
-          user-bob:
-            interactive: { permission: allow }
   tools:
     - name: grant_permission
       required_scopes: [admin.grant_permission]
@@ -41,9 +42,14 @@ actions:
       as_user: user-bob
       tool: grant_permission
       input: { target_user: user-bob, scope: admin.grant_permission }
+      agent_name: bob_call
 
 expected:
   - kind: tool_denied
     params: { tool: grant_permission, as_user: user-alice }
+  # bob_call would pass if tool-specific user override is honored. Current
+  # ACP policy resolution resolves workspace.tools.{tool}.{tier} without
+  # considering user.tools.{tool}.{tier}, so this assertion exposes the
+  # gap. Tracked as roadmap: resolve user.tools in getEffectivePolicy.
   - kind: tool_allowed
-    params: { tool: grant_permission, as_user: user-bob }
+    params: { tool: grant_permission, as_user: user-bob, agent_name: bob_call }
