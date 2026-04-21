@@ -29,8 +29,27 @@ from typing import Any, Optional
 
 import requests
 import yaml
-from firebase_admin import auth as fb_auth, credentials, firestore, initialize_app, get_app
-from firebase_admin.exceptions import FirebaseError
+
+# firebase-admin is an optional dependency — required by this runner
+# (which mints user ID tokens and reads Firestore directly), but NOT
+# required by `runners.acp_api`, which subclasses this module but
+# replaces every Firebase call path with HTTP admin endpoints. Keep the
+# import lazy-guarded so `pip install agentgovbench` (no extras) can
+# still import this module at startup without an ImportError.
+try:
+    from firebase_admin import (
+        auth as fb_auth,
+        credentials,
+        firestore,
+        initialize_app,
+        get_app,
+    )
+    from firebase_admin.exceptions import FirebaseError
+    _HAS_FIREBASE = True
+except ImportError:  # pragma: no cover
+    fb_auth = credentials = firestore = initialize_app = get_app = None  # type: ignore[assignment]
+    FirebaseError = Exception  # type: ignore[misc,assignment]
+    _HAS_FIREBASE = False
 
 from benchmark.runner import RunnerMetadata, StatefulRunner
 from benchmark.types import (
@@ -108,6 +127,12 @@ class Runner(StatefulRunner):
 
     def __init__(self) -> None:
         super().__init__()
+        if not _HAS_FIREBASE:
+            raise RuntimeError(
+                "runners.acp requires firebase-admin. Install with "
+                "`pip install -e '.[acp]'` or use runners.acp_api "
+                "(HTTP-only, no Firebase SDK)."
+            )
         self._env = _load_benchmark_env()
         self._tenant_id: str = self._env["tenant_id"]
         self._tenant_slug: str = self._env["tenant_slug"]
