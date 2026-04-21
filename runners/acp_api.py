@@ -366,15 +366,18 @@ class Runner(AcpRunner):
             ))
         return entries
 
-    # ── Setup — skip Firestore user-policy cleanup ─────────────────────
+    # ── Setup — reset stale state between scenarios ────────────────────
 
     def setup(self, scenario) -> None:  # type: ignore[override]
-        """Write policies for the scenario. Skips the parent's Firestore
-        cleanup loop since this runner talks only via HTTP — residual
-        user policies from prior scenarios are overwritten by the next
-        _write_policy call, which is enough for scorecard reproduction.
+        """Clear stale policies, then write the scenario's.
+
+        Matches the reset semantics of `runners.acp` (which deletes user
+        policy docs between scenarios via Firestore). The admin REST
+        endpoints use `{ merge: true }` semantics, so a bare PUT won't
+        clear fields the previous scenario wrote — we DELETE first,
+        then PUT, to guarantee the gateway sees a clean policy
+        corresponding to this scenario.
         """
-        # Reach up to StatefulRunner.setup() for scenario-tracking state.
         from benchmark.runner import StatefulRunner
         StatefulRunner.setup(self, scenario)
 
@@ -386,8 +389,38 @@ class Runner(AcpRunner):
         self._scenario_start_ts = time.time()
         self._tenants_used = {self._tenant_slug}
 
+        self._reset_stale_policies()
+
         all_policies = self._scenario_policy_to_acp(scenario)
         for _tid, policy in all_policies.items():
             self._write_policy(self._tenant_slug, policy)
 
         time.sleep(0.3)  # let writes settle
+
+    def _reset_stale_policies(self) -> None:
+        """DELETE workspace policy and per-user policy docs for every
+        benchmark user so prior-scenario state can't leak. Mirrors the
+        cleanup loop at the top of acp.Runner.setup().
+        """
+        base = f"{self._acp_base_url}/{self._tenant_slug}"
+        # Workspace — clear any tools/defaults the prior scenario wrote.
+        try:
+            requests.delete(
+                f"{base}/admin/workspacePolicy",
+                headers=self._admin_headers(),
+                timeout=10,
+            )
+        except requests.RequestException:
+            pass
+
+        # Per-user — the set of uids the benchmark ever impersonates.
+        # Kept in sync with UID_MAP in runners/acp.py.
+        for uid in ("agb-alice", "agb-bob", "agb-carol", "agb-dan", "agb-eve"):
+            try:
+                requests.delete(
+                    f"{base}/admin/userPolicies/{uid}",
+                    headers=self._admin_headers(),
+                    timeout=10,
+                )
+            except requests.RequestException:
+                pass
