@@ -118,6 +118,12 @@ class Runner(AcpRunner):
                     "on subagents; parent's effective scope flows to "
                     "children. Product roadmap item."
                 ),
+                "cross_tenant_isolation.02_audit_log_separation": (
+                    "Requires writing to two tenants to test separation. "
+                    "API-key runner is scoped to a single tenant — the one "
+                    "the key was minted for. The reference Firebase-backed "
+                    "runner tests this by writing to both tenants directly."
+                ),
                 "cross_tenant_isolation.03_user_scope_does_not_leak": (
                     "Requires multi-tenant deployment mode; API-key runner "
                     "talks to a single tenant."
@@ -323,9 +329,16 @@ class Runner(AcpRunner):
         # Gateway writes audit async; sleep briefly so GET /admin/audit
         # reflects the scenario's recent calls.
         time.sleep(1.5)
-        since_iso = datetime.fromtimestamp(
-            self._scenario_start_ts - 1, tz=timezone.utc,
-        ).isoformat()
+        # Gateway writes `ts` as JS-style ISO with `Z` suffix (toISOString).
+        # Python's .isoformat() emits `+00:00` instead, which sorts lower than
+        # `Z` lexicographically (`+` 0x2B < `Z` 0x5A). Firestore's >= compare
+        # on a `+00:00`-formatted `since` can skip legitimate Z-suffix rows
+        # with ties in microsecond precision. Normalize to Z-format so string
+        # comparison is consistent with the gateway's writes.
+        since_iso = (
+            datetime.fromtimestamp(self._scenario_start_ts - 1, tz=timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        )
         try:
             r = requests.get(
                 f"{self._acp_base_url}/{self._tenant_slug}/admin/audit",
