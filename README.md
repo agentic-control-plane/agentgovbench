@@ -123,7 +123,7 @@ Same gateway. Same scenarios. Same scorer. The spread is architectural, not prod
 
 ## Submitting results for your product
 
-We want your product represented. The ACP team built this benchmark, but the scenarios don't know what ACP is — the same `BaseRunner` interface works for Guardrails AI, Credo AI, NeMo Guardrails, Lakera, Portkey, or any governance product.
+We want your product represented. The ACP team built this benchmark, but the scenarios don't know what ACP is — the same `BaseRunner` interface works for any governance product, regardless of vendor.
 
 1. Implement `BaseRunner` in `runners/<your-product>.py` — typically ~200 lines.
 2. Run the full scenario set and commit `results/<your-product>-vX.Y.Z.json`.
