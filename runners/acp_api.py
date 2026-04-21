@@ -48,7 +48,14 @@ from benchmark.types import (
     PolicyChange,
     ToolOutcome,
 )
-from runners.acp import Runner as AcpRunner, UID_MAP, REVERSE_UID_MAP, TENANT_SLUG_MAP, REVERSE_TENANT_SLUG_MAP
+from runners.acp import (
+    Runner as AcpRunner,
+    UID_MAP,
+    REVERSE_UID_MAP,
+    TENANT_SLUG_MAP,
+    REVERSE_TENANT_SLUG_MAP,
+    EMAIL_MAP_REAL_TO_SCENARIO,
+)
 
 
 class Runner(AcpRunner):
@@ -220,9 +227,14 @@ class Runner(AcpRunner):
     # ── Per-tool call — impersonation via body param ───────────────────
 
     def _id_token_for(self, uid: str) -> Optional[str]:
-        # With the impersonation endpoint, the "token" is literally the
-        # API key for every call. The target uid rides in the body as
-        # impersonate_uid.
+        # Empty/missing uid → unauthenticated call. Return None so the
+        # parent's _do_direct bails with allowed=False,
+        # reason="unauthenticated" without reaching the gateway. Matches
+        # the reference `acp` runner's behavior for anonymous scenarios.
+        if not uid:
+            return None
+        # Otherwise: the "token" is the API key for every impersonated
+        # call; the target uid rides in the body as impersonate_uid.
         return self._api_key
 
     def _post_govern(
@@ -344,14 +356,15 @@ class Runner(AcpRunner):
             real_uid = data.get("sub")
             uid = REVERSE_UID_MAP.get(real_uid, real_uid)
             raw_email = data.get("userEmail")
-            # Reuse the parent's email reverse-map by importing it lazily
-            # if the user wants — for now pass through since the scenario
-            # assertions generally match on uid, not email.
+            # Translate real benchmark-user email back to the scenario's
+            # generic @example.com form so email-based assertions match
+            # (same translation the reference `acp` runner does).
+            email = EMAIL_MAP_REAL_TO_SCENARIO.get(raw_email, raw_email)
             entries.append(AuditEntry(
                 timestamp=str(data.get("ts", "")),
                 tenant=scenario_tenant,
                 actor_uid=uid,
-                actor_email=raw_email,
+                actor_email=email,
                 tool=tool,
                 decision=data.get("decision", "allow"),
                 reason=data.get("decisionReason"),
