@@ -32,7 +32,7 @@ Reproduces the published scorecard on *your* deployment. Requires a Firebase ser
 git clone https://github.com/agentic-control-plane/agentgovbench
 cd agentgovbench
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e '.[acp]'   # core + firebase-admin for the reference runner
 
 # 2. Point at YOUR Firebase project
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
@@ -47,7 +47,7 @@ python setup/bootstrap_tenant.py
 # 4. Set those into your environment and run
 export AGB_TENANT_ID=<printed_above>
 export AGB_TENANT_SLUG=agentgovbench
-python -m agentgovbench run --runner acp --out results/my-acp.json
+agentgovbench run --runner acp --out results/my-acp.json
 ```
 
 If your ACP instance is configured with the same policy defaults we ship (`setup/bootstrap_tenant.py` writes them for you), you should see the same scorecard as the reference implementation: **45/48**, with 3 documented gaps.
@@ -59,15 +59,15 @@ If you see *different* results, that's the benchmark's main job — either you'r
 Implement the `BaseRunner` interface (`benchmark/runner.py`). Scenarios are framework-agnostic — they describe what the governance layer should enforce, not how. See `CONTRIBUTING.md` for the runner template.
 
 ```bash
-python -m agentgovbench run --runner vanilla        # no-governance baseline
-python -m agentgovbench run --runner acp            # reference runner
-python -m agentgovbench run --runner my-vendor      # your runner
+agentgovbench run --runner vanilla        # no-governance baseline
+agentgovbench run --runner acp            # reference runner
+agentgovbench run --runner my-vendor      # your runner
 
 # Limit to one category for quick iteration
-python -m agentgovbench run --runner acp --category identity_propagation
+agentgovbench run --runner acp --category identity_propagation
 
 # Full results JSON
-python -m agentgovbench run --runner acp --out results.json
+agentgovbench run --runner acp --out results.json
 ```
 
 ## Submitting results for your product

@@ -28,6 +28,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+# Extras for specific runners — kept optional so the core install stays
+# lean for someone writing their own runner. Install e.g.
+# `pip install -e '.[acp]'` to run the reference ACP runner.
+acp = ["firebase-admin>=6.5"]
+crewai = ["crewai>=0.70.0"]
+langchain = ["langchain-core>=0.3", "langgraph>=0.2"]
 
 [project.scripts]
 agentgovbench = "benchmark.cli:main"
