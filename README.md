@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/Scenarios-48-5B5BD6" alt="48 scenarios" />
   <img src="https://img.shields.io/badge/Framework%20runners-7-5B5BD6" alt="7 runners" />
-  <a href="https://doi.org/10.6028/NIST.AI.100-1"><img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" /></a>
+  <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" /></a>
 </p>
 
 <p align="center">
@@ -34,28 +34,18 @@ Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **mode
                                          (logs enough to reconstruct?)
 ```
 
-Eight categories, each mapped to one or more [NIST AI RMF 1.0](https://doi.org/10.6028/NIST.AI.100-1) controls:
+Eight categories, each mapped to one or more <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">NIST AI RMF 1.0</a> controls:
 
 | # | Category | What breaks if this fails | NIST |
 |---|---|---|---|
-| 1 | **Identity propagation** | End user's identity doesn't reach the tool; audit attributes actions to the agent, not the human | [MAP-2.1], [MEASURE-2.6], [GOVERN-1.4] |
-| 2 | **Per-user policy enforcement** | User X's subagent performs actions X was forbidden from | [GOVERN-1.2] |
-| 3 | **Delegation provenance** | Cannot trace a tool call back to the originating user through the delegation chain | [MEASURE-2.3] |
-| 4 | **Scope inheritance** | Child agent inherits parent's broader scope instead of being narrowed to its task | [MAP-4.1], [MEASURE-2.7] |
-| 5 | **Rate-limit cascade** | User bypasses a rate limit by spawning N subagents | [MANAGE-2.1] |
-| 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | [MEASURE-2.3] |
-| 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | [GOVERN-1.1] |
-| 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | [GOVERN-1.2] |
-
-[MAP-2.1]: https://doi.org/10.6028/NIST.AI.100-1
-[MAP-4.1]: https://doi.org/10.6028/NIST.AI.100-1
-[MEASURE-2.3]: https://doi.org/10.6028/NIST.AI.100-1
-[MEASURE-2.6]: https://doi.org/10.6028/NIST.AI.100-1
-[MEASURE-2.7]: https://doi.org/10.6028/NIST.AI.100-1
-[MANAGE-2.1]: https://doi.org/10.6028/NIST.AI.100-1
-[GOVERN-1.1]: https://doi.org/10.6028/NIST.AI.100-1
-[GOVERN-1.2]: https://doi.org/10.6028/NIST.AI.100-1
-[GOVERN-1.4]: https://doi.org/10.6028/NIST.AI.100-1
+| 1 | **Identity propagation** | End user's identity doesn't reach the tool; audit attributes actions to the agent, not the human | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MAP-2.1</a>, <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.6</a>, <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.4</a> |
+| 2 | **Per-user policy enforcement** | User X's subagent performs actions X was forbidden from | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.2</a> |
+| 3 | **Delegation provenance** | Cannot trace a tool call back to the originating user through the delegation chain | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.3</a> |
+| 4 | **Scope inheritance** | Child agent inherits parent's broader scope instead of being narrowed to its task | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MAP-4.1</a>, <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.7</a> |
+| 5 | **Rate-limit cascade** | User bypasses a rate limit by spawning N subagents | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MANAGE-2.1</a> |
+| 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.3</a> |
+| 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.1</a> |
+| 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.2</a> |
 
 Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full control mapping: [`NIST_MAPPING.md`](NIST_MAPPING.md). All 48 scenarios with expected outcomes: [`scenarios/`](scenarios/).
 
