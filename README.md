@@ -1,10 +1,38 @@
-# AgentGovBench
+<h1 align="center">AgentGovBench</h1>
 
-**An open benchmark for AI agent governance. Mapped to NIST AI RMF. Vendor-neutral.**
+<p align="center">
+  <strong>An open benchmark for AI agent governance. Mapped to NIST AI RMF. Vendor-neutral.</strong>
+</p>
 
-Multi-agent LLM systems have a governance layer between the user and the tools: identity propagation, permission enforcement, delegation provenance, rate limiting, audit. Existing benchmarks (AgentLeak, InjecAgent, AgentDAM) test *model* behavior under adversarial conditions. AgentGovBench tests *the governance layer around the model* — the part that's supposed to enforce policy regardless of what the model does.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/Scenarios-48-5B5BD6" alt="48 scenarios" />
+  <img src="https://img.shields.io/badge/Framework%20runners-7-5B5BD6" alt="7 runners" />
+  <img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" />
+</p>
+
+<p align="center">
+  <a href="https://agenticcontrolplane.com/benchmark">Live scorecard</a> ·
+  <a href="https://agenticcontrolplane.com/blog/how-we-test-agent-governance">Methodology</a> ·
+  <a href="https://agenticcontrolplane.com/blog/architecture-is-governance">Architecture-is-governance</a> ·
+  <a href="https://agenticcontrolplane.com">agenticcontrolplane.com</a>
+</p>
+
+---
 
 ## What it measures
+
+Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **model** — does the LLM refuse harmful prompts, resist injection, protect PII. AgentGovBench tests the **governance layer around the model** — the part responsible for who can call which tool, whose identity rides along with each call, how rate limits cascade across delegated subagents, and what the audit record contains after the fact.
+
+```
+  What other benchmarks test             What AgentGovBench tests
+  ─────────────────────────              ───────────────────────────
+       The model's behavior              The system around the model
+       (refuses bad prompts?)            (enforces the policy?)
+                                         (attributes the call?)
+                                         (logs enough to reconstruct?)
+```
 
 Eight categories, each mapped to one or more NIST AI RMF 1.0 controls:
 
@@ -13,84 +41,100 @@ Eight categories, each mapped to one or more NIST AI RMF 1.0 controls:
 | 1 | **Identity propagation** | End user's identity doesn't reach the tool; audit attributes actions to the agent, not the human | MAP-2.1, MEASURE-2.6, GOVERN-1.4 |
 | 2 | **Per-user policy enforcement** | User X's subagent performs actions X was forbidden from | GOVERN-1.2 |
 | 3 | **Delegation provenance** | Cannot trace a tool call back to the originating user through the delegation chain | MEASURE-2.3 |
-| 4 | **Scope inheritance / privilege escalation** | Child agent inherits parent's broader scope instead of being narrowed to its task | MAP-4.1, MEASURE-2.7 |
-| 5 | **Rate limit cascade** | User bypasses rate limit by spawning N subagents | MANAGE-2.1 |
+| 4 | **Scope inheritance** | Child agent inherits parent's broader scope instead of being narrowed to its task | MAP-4.1, MEASURE-2.7 |
+| 5 | **Rate-limit cascade** | User bypasses a rate limit by spawning N subagents | MANAGE-2.1 |
 | 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | MEASURE-2.3 |
 | 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | GOVERN-1.1 |
 | 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | GOVERN-1.2 |
 
-The deeper rationale and threat model live in [`METHODOLOGY.md`](METHODOLOGY.md). The control mapping and rationale live in [`NIST_MAPPING.md`](NIST_MAPPING.md).
+Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full control mapping: [`NIST_MAPPING.md`](NIST_MAPPING.md). All 48 scenarios with expected outcomes: [`scenarios/`](scenarios/).
 
-## Running the benchmark
+## Quickstart
 
-### Against your own ACP instance
+### 1. Run the no-governance baseline (zero setup, ~60 seconds)
 
-Reproduces the published scorecard on *your* deployment. Requires a Firebase service account JSON with admin rights on your ACP project.
+Works on a fresh clone with no credentials. Shows what a framework scores when governance is not in place — the scorecard floor.
 
 ```bash
-# 1. Clone and install
 git clone https://github.com/agentic-control-plane/agentgovbench
 cd agentgovbench
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[acp]'   # core + firebase-admin for the reference runner
-
-# 2. Point at YOUR Firebase project
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/firebase-service-account.json
-export AGB_PROJECT=your-firebase-project-id
-export AGB_EMAIL_DOMAIN=bench.yourdomain.com   # any domain you control
-export FIREBASE_WEB_API_KEY=your-public-firebase-web-api-key
-
-# 3. Bootstrap a clean benchmark tenant + synthetic users
-python setup/bootstrap_tenant.py
-# Prints AGB_TENANT_ID and AGB_TENANT_SLUG
-
-# 4. Set those into your environment and run
-export AGB_TENANT_ID=<printed_above>
-export AGB_TENANT_SLUG=agentgovbench
-agentgovbench run --runner acp --out results/my-acp.json
+pip install -e .
+agentgovbench run --runner vanilla
 ```
 
-If your ACP instance is configured with the same policy defaults we ship (`setup/bootstrap_tenant.py` writes them for you), you should see the same scorecard as the reference implementation: **45/48**, with 3 documented gaps.
+Expected: **13/48**. Shows the harness, scorer, and scenario library are working.
 
-If you see *different* results, that's the benchmark's main job — either you're on an older ACP version (upgrade and rerun) or you've found a real governance gap in our product we haven't seen yet. File an issue.
+### 2. Reproduce the ACP scorecard (zero Firebase, ~5 minutes)
 
-### Against any governance product (not just ACP)
-
-Implement the `BaseRunner` interface (`benchmark/runner.py`). Scenarios are framework-agnostic — they describe what the governance layer should enforce, not how. See `CONTRIBUTING.md` for the runner template.
+Hits a live ACP deployment using only an API key. No Firebase Admin SDK, no service-account JSON. You'll need a `gsk_` API key minted on the target ACP deployment with `bench.impersonate` and `admin.audit.read` scopes.
 
 ```bash
-agentgovbench run --runner vanilla        # no-governance baseline
-agentgovbench run --runner acp            # reference runner
-agentgovbench run --runner my-vendor      # your runner
-
-# Limit to one category for quick iteration
-agentgovbench run --runner acp --category identity_propagation
-
-# Full results JSON
-agentgovbench run --runner acp --out results.json
+pip install -e '.[acp]'   # adds firebase-admin; optional for this runner, required for --runner acp
+export ACP_API_KEY=gsk_your-tenant-slug_...
+export ACP_BASE_URL=https://api.agenticcontrolplane.com   # or your deployment
+export ACP_TENANT_SLUG=your-tenant-slug
+agentgovbench run --runner acp_api --out results/acp-api.json
 ```
 
-## Submitting results for your product
+Expected: **45/48** against `api.agenticcontrolplane.com`, with 3 documented declinations. Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
 
-We want your product represented. To add a runner:
+### 3. Run any of the seven framework runners
 
-1. Implement the `BaseRunner` interface in `benchmark/runner.py`
-2. Drop your runner in `runners/<your-product>.py`
-3. Submit a PR with your runner + a `results/<your-product>-vX.Y.Z.json` from a run against the current scenario set
+```bash
+agentgovbench run --runner crewai_native                # CrewAI without governance — baseline
+agentgovbench run --runner crewai_acp                   # CrewAI + ACP @governed decorator
+agentgovbench run --runner langgraph_native
+agentgovbench run --runner langgraph_acp
+agentgovbench run --runner claude_code_acp              # via hook protocol
+agentgovbench run --runner codex_acp
+agentgovbench run --runner openai_agents_acp            # via base_url proxy
+agentgovbench run --runner anthropic_agent_sdk_acp      # via governHandlers
+agentgovbench run --runner cursor_acp                   # via MCP server
 
-No cherry-picking, no hidden config — the point of this benchmark is *reproducible*, *comparable* numbers. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+# Limit to one category for quick iteration
+agentgovbench run --runner acp_api --category identity_propagation
+```
+
+Each framework runner requires the respective SDK. Install with `pip install -e '.[crewai]'` / `.[langchain]` / etc.
+
+## The seven-framework result
+
+We ran every runner against the same backend and published every scorecard. The nine-point spread tells the story:
+
+| Integration pattern | Frameworks | Score |
+|---|---|---|
+| **Decorator** at orchestration boundary | Anthropic Agent SDK (`governHandlers`) | **46 / 48** |
+| **Proxy** | OpenAI Agents SDK (`base_url` swap) | 45 / 48 |
+| **Hook** | Claude Code · Codex CLI | 43 / 48 each |
+| **Decorator** below orchestration | CrewAI · LangGraph (`@governed`) | 40 / 48 each |
+| **MCP** | Cursor | 37 / 48 |
+
+Same gateway. Same scenarios. Same scorer. The spread is architectural, not product-quality. [Full walkthrough →](https://agenticcontrolplane.com/blog/architecture-is-governance)
 
 ## Design principles
 
-- **Deterministic** — no LLM in the hot path. Scenarios fully describe the agent action sequence; governance layer is tested on what it does with those actions. Reproducible byte-for-byte across runs.
-- **Framework-agnostic** — scenarios don't assume CrewAI, LangGraph, AutoGen. They describe actions and expected outcomes.
-- **Pluggable** — any governance product can implement the runner interface. No ACP assumptions in the scenarios.
+- **Deterministic** — no LLM in the hot path. Scenarios fully describe the agent action sequence; governance is tested on what it does with those actions. Reproducible byte-for-byte across runs.
+- **Framework-agnostic** — scenarios don't assume CrewAI, LangGraph, Claude, etc. They describe actions and expected governance outcomes.
+- **Pluggable** — any governance product implements the `BaseRunner` interface. No ACP assumptions in the scenarios.
 - **Versioned** — each scenario carries a version. Old results remain comparable; new scenarios extend the set without breaking history.
-- **Published honest** — the reference implementation's own results include partial failures. A benchmark that says *"we pass everything"* isn't credible.
+- **Published honest** — the reference ACP runner declines 3 scenarios in its own scorecard. A benchmark that says *"we pass everything"* isn't credible.
+
+## Submitting results for your product
+
+We want your product represented. The ACP team built this benchmark, but the scenarios don't know what ACP is — the same `BaseRunner` interface works for Guardrails AI, Credo AI, NeMo Guardrails, Lakera, Portkey, or any governance product.
+
+1. Implement `BaseRunner` in `runners/<your-product>.py` — typically ~200 lines.
+2. Run the full scenario set and commit `results/<your-product>-vX.Y.Z.json`.
+3. Open a PR. No cherry-picking, no hidden config. That's the point.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklist.
 
 ## Status
 
-**v0.1** — spec complete, harness scaffolding in place, 3 example scenarios across 2 categories. Scenario library fills in from here.
+**v0.2** — 48 scenarios across 8 categories. Reference ACP runner passes 45/48 with 3 documented declinations. Seven framework runners shipped. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
+
+Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We're the first to put a number on our own governance product; we'd like the rest of the space to follow.
 
 ## Citing
 
@@ -98,6 +142,7 @@ No cherry-picking, no hidden config — the point of this benchmark is *reproduc
 @software{agentgovbench2026,
   title        = {AgentGovBench: an open benchmark for AI agent governance},
   year         = {2026},
+  version      = {0.2.0},
   url          = {https://github.com/agentic-control-plane/agentgovbench}
 }
 ```
