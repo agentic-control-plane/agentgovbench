@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://agenticcontrolplane.com/benchmark">Live scorecard</a> ·
+  <a href="https://agenticcontrolplane.com/benchmark/scenarios">All 48 scenarios</a> ·
   <a href="https://agenticcontrolplane.com/blog/how-we-test-agent-governance">Methodology</a> ·
   <a href="https://agenticcontrolplane.com/blog/architecture-is-governance">Architecture-is-governance</a> ·
   <a href="https://agenticcontrolplane.com">agenticcontrolplane.com</a>
