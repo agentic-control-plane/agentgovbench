@@ -29,7 +29,7 @@ Reproduces the published scorecard on *your* deployment. Requires a Firebase ser
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/openagentgov/agentgovbench
+git clone https://github.com/agentic-control-plane/agentgovbench
 cd agentgovbench
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -98,7 +98,7 @@ No cherry-picking, no hidden config — the point of this benchmark is *reproduc
 @software{agentgovbench2026,
   title        = {AgentGovBench: an open benchmark for AI agent governance},
   year         = {2026},
-  url          = {https://github.com/openagentgov/agentgovbench}
+  url          = {https://github.com/agentic-control-plane/agentgovbench}
 }
 ```
 
