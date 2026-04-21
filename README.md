@@ -38,14 +38,24 @@ Eight categories, each mapped to one or more [NIST AI RMF 1.0](https://doi.org/1
 
 | # | Category | What breaks if this fails | NIST |
 |---|---|---|---|
-| 1 | **Identity propagation** | End user's identity doesn't reach the tool; audit attributes actions to the agent, not the human | MAP-2.1, MEASURE-2.6, GOVERN-1.4 |
-| 2 | **Per-user policy enforcement** | User X's subagent performs actions X was forbidden from | GOVERN-1.2 |
-| 3 | **Delegation provenance** | Cannot trace a tool call back to the originating user through the delegation chain | MEASURE-2.3 |
-| 4 | **Scope inheritance** | Child agent inherits parent's broader scope instead of being narrowed to its task | MAP-4.1, MEASURE-2.7 |
-| 5 | **Rate-limit cascade** | User bypasses a rate limit by spawning N subagents | MANAGE-2.1 |
-| 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | MEASURE-2.3 |
-| 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | GOVERN-1.1 |
-| 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | GOVERN-1.2 |
+| 1 | **Identity propagation** | End user's identity doesn't reach the tool; audit attributes actions to the agent, not the human | [MAP-2.1], [MEASURE-2.6], [GOVERN-1.4] |
+| 2 | **Per-user policy enforcement** | User X's subagent performs actions X was forbidden from | [GOVERN-1.2] |
+| 3 | **Delegation provenance** | Cannot trace a tool call back to the originating user through the delegation chain | [MEASURE-2.3] |
+| 4 | **Scope inheritance** | Child agent inherits parent's broader scope instead of being narrowed to its task | [MAP-4.1], [MEASURE-2.7] |
+| 5 | **Rate-limit cascade** | User bypasses a rate limit by spawning N subagents | [MANAGE-2.1] |
+| 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | [MEASURE-2.3] |
+| 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | [GOVERN-1.1] |
+| 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | [GOVERN-1.2] |
+
+[MAP-2.1]: https://doi.org/10.6028/NIST.AI.100-1
+[MAP-4.1]: https://doi.org/10.6028/NIST.AI.100-1
+[MEASURE-2.3]: https://doi.org/10.6028/NIST.AI.100-1
+[MEASURE-2.6]: https://doi.org/10.6028/NIST.AI.100-1
+[MEASURE-2.7]: https://doi.org/10.6028/NIST.AI.100-1
+[MANAGE-2.1]: https://doi.org/10.6028/NIST.AI.100-1
+[GOVERN-1.1]: https://doi.org/10.6028/NIST.AI.100-1
+[GOVERN-1.2]: https://doi.org/10.6028/NIST.AI.100-1
+[GOVERN-1.4]: https://doi.org/10.6028/NIST.AI.100-1
 
 Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full control mapping: [`NIST_MAPPING.md`](NIST_MAPPING.md). All 48 scenarios with expected outcomes: [`scenarios/`](scenarios/).
 
