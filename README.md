@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/Scenarios-48-5B5BD6" alt="48 scenarios" />
   <img src="https://img.shields.io/badge/Framework%20runners-7-5B5BD6" alt="7 runners" />
-  <img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" />
+  <a href="https://doi.org/10.6028/NIST.AI.100-1"><img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" /></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@ Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **mode
                                          (logs enough to reconstruct?)
 ```
 
-Eight categories, each mapped to one or more NIST AI RMF 1.0 controls:
+Eight categories, each mapped to one or more [NIST AI RMF 1.0](https://doi.org/10.6028/NIST.AI.100-1) controls:
 
 | # | Category | What breaks if this fails | NIST |
 |---|---|---|---|
