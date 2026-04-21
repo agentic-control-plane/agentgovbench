@@ -240,6 +240,13 @@ class Runner(AcpRunner):
         # derived from the currently-in-flight user (tracked below).
         impersonate_uid = getattr(self, "_current_impersonate_uid", None)
 
+        # Rewrite `/govern/tool-use` → `/admin/bench/tool-use` so the
+        # gateway's impersonation middleware fires. The parent builds the
+        # path assuming JWT-authenticated user calls; we're an API key
+        # that needs to impersonate, so we live on the admin/bench mount.
+        if impersonate_uid:
+            path = path.replace("/govern/", "/admin/bench/")
+
         body: dict[str, Any] = {
             "tool_name": tool,
             "tool_input": tool_input,
