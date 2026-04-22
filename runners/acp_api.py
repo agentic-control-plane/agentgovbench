@@ -453,12 +453,14 @@ class Runner(AcpRunner):
 
         self._scenario_start_ts = time.time()
 
-        # Scenarios this runner can't honestly test (declined_categories)
-        # should not execute actions — we'd otherwise collapse two-tenant
-        # scenarios onto our single tenant and register false leaks, or
-        # try to exercise tool overrides that need harness changes. Mark
-        # scenario as skip so execute_action + audit_log short-circuit.
-        self._skip_scenario = scenario.id in self.metadata.declined_categories
+        # Only ONE scenario needs early-skip: cross_tenant_isolation.02
+        # collapses two tenants onto the runner's single tenant and
+        # registers false cross-tenant leaks. Other declined scenarios
+        # still run — their assertions happen to pass on a single
+        # tenant or just get counted as documented declinations in the
+        # scorecard. Skipping them breaks positive assertions that
+        # require outcomes.
+        self._skip_scenario = scenario.id == "cross_tenant_isolation.02_audit_log_separation"
 
         self._reset_stale_policies()
 
