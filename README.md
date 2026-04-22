@@ -78,7 +78,7 @@ export ACP_TENANT_SLUG=your-tenant-slug
 agentgovbench run --runner acp_api --out results/acp-api.json
 ```
 
-Expected: **45/48** against `api.agenticcontrolplane.com`, with 3 documented declinations. Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+Expected: **46/48** against `api.agenticcontrolplane.com`, with 2 documented declinations (the two cross-tenant scenarios that require multi-tenant deployment mode). Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
 
 ### 3. Run any of the seven framework runners
 

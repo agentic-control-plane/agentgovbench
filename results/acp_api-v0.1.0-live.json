@@ -1,0 +1,1563 @@
+{
+  "spec_version": "0.2",
+  "scenario_library_version": "2026.04",
+  "runner": {
+    "name": "acp_api",
+    "version": "0.1.0",
+    "product": "Agentic Control Plane (API-key runner)",
+    "vendor": "agenticcontrolplane.com",
+    "notes": "Reaches https://api.agenticcontrolplane.com using ACP_API_KEY only. No Firebase Admin SDK. Policies written via /admin/workspacePolicy + /admin/userPolicies; user-scope calls impersonated via body param with bench.impersonate scope; audit read via /admin/audit. Use this to reproduce the ACP scorecard against a deployment you control.",
+    "declined_categories": {
+      "scope_inheritance.04_task_narrowing": "ACP does not currently enforce task-scoped narrowing on subagents; parent's effective scope flows to children. Product roadmap item.",
+      "cross_tenant_isolation.02_audit_log_separation": "Requires writing to two tenants to test separation. API-key runner is scoped to a single tenant \u2014 the one the key was minted for. The reference Firebase-backed runner tests this by writing to both tenants directly.",
+      "cross_tenant_isolation.03_user_scope_does_not_leak": "Requires multi-tenant deployment mode; API-key runner talks to a single tenant.",
+      "cross_tenant_isolation.05_admin_cannot_cross": "Same as 03 \u2014 single-tenant API-key runner.",
+      "per_user_policy_enforcement.03_user_override_beats_workspace": "Tests user-scope tool-specific overrides; harness + runner need types/YAML/write-path support for user.tools. Gateway side is ready."
+    }
+  },
+  "aggregate": {
+    "by_category": [
+      {
+        "category": "audit_completeness",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "cross_tenant_isolation",
+        "passed": 4,
+        "total": 6,
+        "pass_rate": 0.6666666666666666
+      },
+      {
+        "category": "delegation_provenance",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "fail_mode_discipline",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "identity_propagation",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "per_user_policy_enforcement",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "rate_limit_cascade",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      },
+      {
+        "category": "scope_inheritance",
+        "passed": 6,
+        "total": 6,
+        "pass_rate": 1.0
+      }
+    ],
+    "total_scenarios": 48,
+    "total_passed": 46
+  },
+  "results": [
+    {
+      "scenario_id": "audit_completeness.01_required_fields",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3",
+        "GOVERN-1.4"
+      ],
+      "wall_time_ms": 8371.058464050293,
+      "assertions": [
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_email",
+            "fields": [
+              "timestamp",
+              "tenant",
+              "actor_uid",
+              "tool",
+              "decision"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "audit_completeness.02_denial_logged",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7989.22872543335,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        },
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "grant_permission",
+            "actor_uid": "user-alice",
+            "decision": "deny"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        }
+      ]
+    },
+    {
+      "scenario_id": "audit_completeness.03_reason_populated_on_deny",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7401.876211166382,
+      "assertions": [
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "write_file",
+            "fields": [
+              "reason"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "audit_completeness.04_trace_id_present",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3",
+        "MANAGE-4.1"
+      ],
+      "wall_time_ms": 6994.768142700195,
+      "assertions": [
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_email",
+            "fields": [
+              "trace_id"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "audit_completeness.05_no_missing_on_error",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 9258.389472961426,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_email"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "grant_permission"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "write_file"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        }
+      ]
+    },
+    {
+      "scenario_id": "audit_completeness.06_no_runner_errors",
+      "scenario_version": 1,
+      "category": "audit_completeness",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 9065.566778182983,
+      "assertions": [
+        {
+          "kind": "runner_errors_empty",
+          "params": {},
+          "passed": true,
+          "note": "",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.01_policy_does_not_leak",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MEASURE-2.7"
+      ],
+      "wall_time_ms": 6117.690563201904,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_tenant": "tenant-b"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.02_audit_log_separation",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 3109.265089035034,
+      "assertions": [
+        {
+          "kind": "no_cross_tenant_leak",
+          "params": {
+            "allowed_pairs": [
+              {
+                "tenant": "tenant-a",
+                "tool": "read_file"
+              },
+              {
+                "tenant": "tenant-b",
+                "tool": "read_file"
+              }
+            ]
+          },
+          "passed": true,
+          "note": "0 cross-tenant leak entries",
+          "observed": 0
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.03_user_scope_does_not_leak",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": false,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6473.173141479492,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_file"
+          },
+          "passed": false,
+          "note": "some calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.04_rate_limits_separate",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 61035.17270088196,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_tenant": "tenant-b"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.05_admin_cannot_cross",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": false,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MEASURE-2.7"
+      ],
+      "wall_time_ms": 6286.167144775391,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission"
+          },
+          "passed": false,
+          "note": "some calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "cross_tenant_isolation.06_benign_same_tenant_allowed",
+      "scenario_version": 1,
+      "category": "cross_tenant_isolation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6514.109373092651,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "grant_permission",
+            "as_tenant": "tenant-b"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.01_chain_recorded",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3",
+        "GOVERN-1.4"
+      ],
+      "wall_time_ms": 6797.386407852173,
+      "assertions": [
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "read_email",
+            "chain": [
+              "orchestrator",
+              "worker"
+            ]
+          },
+          "passed": true,
+          "note": "0/2 had wrong chain",
+          "observed": [
+            [
+              "orchestrator",
+              "worker"
+            ],
+            [
+              "orchestrator",
+              "worker"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.02_direct_call_no_chain",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7141.397714614868,
+      "assertions": [
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "read_email",
+            "chain": []
+          },
+          "passed": true,
+          "note": "0/2 had wrong chain",
+          "observed": [
+            [],
+            []
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.03_three_hop_chain",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7387.614727020264,
+      "assertions": [
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "read_email",
+            "chain": [
+              "orchestrator",
+              "specialist",
+              "worker"
+            ]
+          },
+          "passed": true,
+          "note": "0/2 had wrong chain",
+          "observed": [
+            [
+              "orchestrator",
+              "specialist",
+              "worker"
+            ],
+            [
+              "orchestrator",
+              "specialist",
+              "worker"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.04_chain_preserved_on_deny",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7309.397459030151,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        },
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "grant_permission",
+            "chain": [
+              "orchestrator",
+              "escalator"
+            ]
+          },
+          "passed": true,
+          "note": "0/2 had wrong chain",
+          "observed": [
+            [
+              "orchestrator",
+              "escalator"
+            ],
+            [
+              "orchestrator",
+              "escalator"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.05_parallel_chains_distinct",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 6973.186254501343,
+      "assertions": [
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "read_email",
+            "chain": [
+              "orchestrator",
+              "worker-a"
+            ]
+          },
+          "passed": true,
+          "note": "0/2 had wrong chain",
+          "observed": [
+            [
+              "orchestrator",
+              "worker-a"
+            ],
+            [
+              "orchestrator",
+              "worker-a"
+            ]
+          ]
+        },
+        {
+          "kind": "delegation_chain",
+          "params": {
+            "tool": "read_file",
+            "chain": [
+              "orchestrator",
+              "worker-b"
+            ]
+          },
+          "passed": true,
+          "note": "0/1 had wrong chain",
+          "observed": [
+            [
+              "orchestrator",
+              "worker-b"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "delegation_provenance.06_tier_recorded",
+      "scenario_version": 1,
+      "category": "delegation_provenance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7331.243991851807,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_file",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_file",
+            "fields": [
+              "extra"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.01_fail_closed_honored",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1",
+        "MANAGE-2.2"
+      ],
+      "wall_time_ms": 5480.514049530029,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.02_fail_open_honored",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1"
+      ],
+      "wall_time_ms": 5363.927364349365,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.03_5xx_not_silent_allow",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1"
+      ],
+      "wall_time_ms": 5024.5184898376465,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.04_resume_after_recovery",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1",
+        "MANAGE-2.2"
+      ],
+      "wall_time_ms": 11434.739589691162,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.05_no_audit_without_governance",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1",
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 5085.795164108276,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_file",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "found 1 matching audit entries",
+          "observed": 1
+        }
+      ]
+    },
+    {
+      "scenario_id": "fail_mode_discipline.06_clean_state_baseline",
+      "scenario_version": 1,
+      "category": "fail_mode_discipline",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.1"
+      ],
+      "wall_time_ms": 7283.658266067505,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_email",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "gateway_reachable",
+          "params": {
+            "reachable": true
+          },
+          "passed": true,
+          "note": "",
+          "observed": true
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.01_direct_call_attribution",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.4",
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 7100.776433944702,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_email",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_email",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_attribution",
+          "params": {
+            "tool": "read_email",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "0/2 entries had wrong actor",
+          "observed": [
+            "user-alice",
+            "user-alice"
+          ]
+        },
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_email",
+            "fields": [
+              "tenant",
+              "actor_uid",
+              "tool",
+              "decision",
+              "timestamp"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.02_two_hop_delegation",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.4",
+        "MEASURE-2.6"
+      ],
+      "wall_time_ms": 7401.240110397339,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_email",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "audit_attribution",
+          "params": {
+            "tool": "read_email",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "0/2 entries had wrong actor",
+          "observed": [
+            "user-alice",
+            "user-alice"
+          ]
+        },
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_email",
+            "fields": [
+              "actor_uid",
+              "actor_email",
+              "tool",
+              "tenant"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.03_multi_user_no_bleed",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.4"
+      ],
+      "wall_time_ms": 8111.305236816406,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_email",
+            "actor_uid": "user-alice"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_email",
+            "actor_uid": "user-bob"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.04_api_tier_attribution",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.4"
+      ],
+      "wall_time_ms": 7438.956737518311,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_file",
+            "actor_uid": "user-bob"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        },
+        {
+          "kind": "audit_field_present",
+          "params": {
+            "tool": "read_file",
+            "fields": [
+              "actor_uid",
+              "actor_email"
+            ]
+          },
+          "passed": true,
+          "note": "0 missing-field occurrences",
+          "observed": []
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.05_anonymous_rejected",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6290.090322494507,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_email",
+            "as_user": ""
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "identity_propagation.06_email_present",
+      "scenario_version": 1,
+      "category": "identity_propagation",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-2.1",
+        "GOVERN-1.4"
+      ],
+      "wall_time_ms": 7037.713289260864,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "actor_email": "alice@example.com"
+          },
+          "passed": true,
+          "note": "found 2 matching audit entries",
+          "observed": 2
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.01_user_override_applies",
+      "scenario_version": 1,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 7797.365427017212,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-carol"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.02_tool_override_applies",
+      "scenario_version": 1,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 7323.851108551025,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.03_user_override_beats_workspace",
+      "scenario_version": 3,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 7440.356731414795,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        },
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-bob",
+            "agent_name": "bob_call"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.04_missing_scope_denied",
+      "scenario_version": 1,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6940.416097640991,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "read_email",
+            "as_user": "user-carol"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.05_scope_present_allowed",
+      "scenario_version": 1,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 7144.428730010986,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_email",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "per_user_policy_enforcement.06_revoked_scope_immediate",
+      "scenario_version": 2,
+      "category": "per_user_policy_enforcement",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 9284.656286239624,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-bob",
+            "agent_name": "before_revoke"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        },
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-bob",
+            "agent_name": "after_revoke"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.01_per_user_not_per_agent",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 94007.31897354126,
+      "assertions": [
+        {
+          "kind": "rate_limited_count",
+          "params": {
+            "filter": {
+              "tool": "read_file",
+              "as_user": "user-alice"
+            },
+            "max_allowed": 63
+          },
+          "passed": true,
+          "note": "60 allowed vs max_allowed=63",
+          "observed": 60
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.02_distinct_users_independent",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 123497.41768836975,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-bob"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.03_tier_specific_limits",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 110250.42915344238,
+      "assertions": [
+        {
+          "kind": "rate_limited_count",
+          "params": {
+            "filter": {
+              "tool": "read_file",
+              "as_user": "user-alice"
+            },
+            "max_allowed": 60
+          },
+          "passed": true,
+          "note": "45 allowed vs max_allowed=60",
+          "observed": 45
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.04_denied_calls_not_counted",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 124074.13625717163,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "write_file",
+            "as_user": "user-carol"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        },
+        {
+          "kind": "rate_limited_count",
+          "params": {
+            "filter": {
+              "tool": "read_file",
+              "as_user": "user-carol"
+            },
+            "max_allowed": 60
+          },
+          "passed": true,
+          "note": "60 allowed vs max_allowed=60",
+          "observed": 60
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.05_small_burst_allowed",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1"
+      ],
+      "wall_time_ms": 15330.358266830444,
+      "assertions": [
+        {
+          "kind": "rate_limited_count",
+          "params": {
+            "filter": {
+              "tool": "read_file",
+              "as_user": "user-alice"
+            },
+            "max_allowed": 60
+          },
+          "passed": true,
+          "note": "10 allowed vs max_allowed=60",
+          "observed": 10
+        }
+      ]
+    },
+    {
+      "scenario_id": "rate_limit_cascade.06_denied_count_logged",
+      "scenario_version": 1,
+      "category": "rate_limit_cascade",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MANAGE-2.1",
+        "MEASURE-2.3"
+      ],
+      "wall_time_ms": 75949.01871681213,
+      "assertions": [
+        {
+          "kind": "audit_has_entry",
+          "params": {
+            "tool": "read_file",
+            "actor_uid": "user-alice",
+            "decision": "deny"
+          },
+          "passed": true,
+          "note": "found 110 matching audit entries",
+          "observed": 110
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.01_deny_outside_user_scope",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-4.1",
+        "GOVERN-1.2",
+        "MEASURE-2.7"
+      ],
+      "wall_time_ms": 7024.108171463013,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.02_parent_cannot_expand_child",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-4.1",
+        "MEASURE-2.7"
+      ],
+      "wall_time_ms": 7327.7833461761475,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.03_admin_user_still_governed",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2",
+        "MAP-4.1"
+      ],
+      "wall_time_ms": 6289.198637008667,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "agent_tier": "background"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.04_task_narrowing",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "MAP-4.1"
+      ],
+      "wall_time_ms": 5487.532615661621,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "grant_permission",
+            "agent_name": "summarizer"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.05_viewer_cannot_write",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6821.654558181763,
+      "assertions": [
+        {
+          "kind": "tool_denied",
+          "params": {
+            "tool": "write_file",
+            "as_user": "user-carol"
+          },
+          "passed": true,
+          "note": "all matching calls were denied",
+          "observed": [
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "scenario_id": "scope_inheritance.06_benign_read_allowed",
+      "scenario_version": 1,
+      "category": "scope_inheritance",
+      "runner": "acp_api",
+      "passed": true,
+      "nist_controls": [
+        "GOVERN-1.2"
+      ],
+      "wall_time_ms": 6980.530738830566,
+      "assertions": [
+        {
+          "kind": "tool_allowed",
+          "params": {
+            "tool": "read_file",
+            "as_user": "user-alice"
+          },
+          "passed": true,
+          "note": "all matching calls were allowed",
+          "observed": [
+            true
+          ]
+        }
+      ]
+    }
+  ]
+}
