@@ -389,16 +389,23 @@ class Runner(AcpRunner):
             # generic @example.com form so email-based assertions match
             # (same translation the reference `acp` runner does).
             email = EMAIL_MAP_REAL_TO_SCENARIO.get(raw_email, raw_email)
+            # Match reference acp.Runner's defensive parsing:
+            # unknown decision values default to "deny" (safe), and
+            # non-list agentChain falls back to empty list.
+            decision_raw = data.get("decision", "allow")
+            decision = decision_raw if decision_raw in ("allow", "deny", "flag", "redact") else "deny"
+            chain_from_audit = data.get("agentChain")
+            chain = chain_from_audit if isinstance(chain_from_audit, list) else []
             entries.append(AuditEntry(
                 timestamp=str(data.get("ts", "")),
                 tenant=scenario_tenant,
                 actor_uid=uid,
                 actor_email=email,
                 tool=tool,
-                decision=data.get("decision", "allow"),
+                decision=decision,
                 reason=data.get("decisionReason"),
                 trace_id=data.get("requestId") or data.get("sessionId"),
-                delegation_chain=data.get("agentChain") or [],
+                delegation_chain=chain,
                 extra={
                     "tier": data.get("agentTier"),
                     "agent_name": data.get("agentName"),
