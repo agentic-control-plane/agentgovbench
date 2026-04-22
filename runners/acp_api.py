@@ -243,6 +243,17 @@ class Runner(AcpRunner):
         # call; the target uid rides in the body as impersonate_uid.
         return self._api_key
 
+    def execute_action(self, action: Action) -> Optional[ToolOutcome]:  # type: ignore[override]
+        # Skip scenarios in declined_categories — we can't test them
+        # honestly, and executing their actions pollutes audit (e.g.
+        # two-tenant scenarios collapsed onto one tenant). Declined
+        # scenarios return empty audit, which vacuously passes
+        # no_cross_tenant_leak and fails any positive assertion with
+        # an honest "couldn't run" signal.
+        if getattr(self, "_skip_scenario", False):
+            return None
+        return super().execute_action(action)
+
     def _post_govern(
         self,
         path: str,
@@ -326,6 +337,11 @@ class Runner(AcpRunner):
     def audit_log(self) -> list[AuditEntry]:
         if not self._scenario_start_ts:
             return []
+        # Declined scenarios didn't execute — no audit to look up, and
+        # reading the tenant-wide log window could surface unrelated
+        # entries that look like leaks on no_cross_tenant_leak checks.
+        if getattr(self, "_skip_scenario", False):
+            return []
         # Gateway writes audit async; sleep briefly so GET /admin/audit
         # reflects the scenario's recent calls.
         time.sleep(1.5)
@@ -405,6 +421,7 @@ class Runner(AcpRunner):
         corresponding to this scenario.
         """
         from benchmark.runner import StatefulRunner
+        from runners.acp import Runner as _AcpRunner
         StatefulRunner.setup(self, scenario)
 
         self._simulated_unreachable_until = 0.0
@@ -412,8 +429,36 @@ class Runner(AcpRunner):
         self._chain_by_agent = {}
         self._delegated_scopes_by_agent = {}
         self._local_audit_entries = []
-        self._scenario_start_ts = time.time()
         self._tenants_used = {self._tenant_slug}
+
+        # Rate-limit scenario cool-down. The gateway's per-tier rate
+        # limiter keeps a sliding window of timestamps per
+        # `${tenantId}:${sub}:${tier}` in-memory on each Cloud Run
+        # instance. Two rate-heavy scenarios back-to-back pollute each
+        # other's buckets — the second scenario starts with a partially
+        # full bucket and its expected deny count doesn't land. Parent
+        # `AcpRunner.setup()` has this logic but this override skipped
+        # parent; restore it here.
+        scenario_is_rate_heavy = (
+            scenario.category == "rate_limit_cascade"
+            and any(
+                hasattr(a, "calls_per_worker")
+                and getattr(a, "calls_per_worker", 0) * getattr(a, "worker_count", 1) >= 30
+                for a in scenario.actions
+            )
+        )
+        if _AcpRunner._prev_scenario_was_rate_heavy and scenario_is_rate_heavy:
+            time.sleep(62)  # 60s sliding window + 2s guard band
+        _AcpRunner._prev_scenario_was_rate_heavy = scenario_is_rate_heavy
+
+        self._scenario_start_ts = time.time()
+
+        # Scenarios this runner can't honestly test (declined_categories)
+        # should not execute actions — we'd otherwise collapse two-tenant
+        # scenarios onto our single tenant and register false leaks, or
+        # try to exercise tool overrides that need harness changes. Mark
+        # scenario as skip so execute_action + audit_log short-circuit.
+        self._skip_scenario = scenario.id in self.metadata.declined_categories
 
         self._reset_stale_policies()
 
