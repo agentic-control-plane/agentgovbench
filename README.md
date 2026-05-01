@@ -70,6 +70,8 @@ Expected: **13/48**. Shows the harness, scorer, and scenario library are working
 
 Hits a live ACP deployment using only an API key. No Firebase Admin SDK, no service-account JSON. You'll need a `gsk_` API key minted on the target ACP deployment with `bench.impersonate` and `admin.audit.read` scopes.
 
+> **Mint the key with the right scopes.** The ACP dashboard issues empty-scope keys by default. Use the **"AgentGovBench testing (24h, impersonation)"** preset on the API Keys page — it pre-fills the right scopes and hard-caps expiry to 24h. If you mint a key without the preset, leave the scopes field blank or pass `*`; an explicitly-narrow key without the bench scopes will silently fail audit-related scenarios with messages like `0 matching audit entries`.
+
 ```bash
 pip install -e '.[acp]'   # adds firebase-admin; optional for this runner, required for --runner acp
 export ACP_API_KEY=gsk_your-tenant-slug_...
@@ -79,6 +81,8 @@ agentgovbench run --runner acp_api --out results/acp-api.json
 ```
 
 Expected: **46/48** against `api.agenticcontrolplane.com`, with 2 documented declinations (the two cross-tenant scenarios that require multi-tenant deployment mode). Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+
+> **Scoring much lower than expected (e.g. 18/48)?** The most common cause is a missing scope on your API key. Symptoms: `audit_completeness 0/6`, lots of `tool_allowed: some calls were denied`, and a single `runner_errors_empty: ['audit GET 403: api key lacks admin.audit.read scope']`. Mint a new key with the scopes above and rerun.
 
 ### 3. Run any of the seven framework runners
 

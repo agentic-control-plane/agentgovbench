@@ -51,11 +51,24 @@ def _check_tool_denied(a: Assertion, o: RunOutcome, s: Scenario):
             "all matching calls were denied" if denied else "some calls were allowed")
 
 
+def _audit_read_failure_hint(o: RunOutcome) -> str:
+    """If the runner reported an audit-read failure (e.g. 403 because the
+    API key lacks `admin.audit.read`), surface it in the assertion note —
+    otherwise users see "no audit entries" and assume the gateway didn't
+    write one, when in fact the bench couldn't read what was written."""
+    for err in o.runner_errors:
+        if "audit GET" in err:
+            return f"  (audit read failed: {err}; check the API key has admin.audit.read scope)"
+    return ""
+
+
 def _check_audit_has_entry(a: Assertion, o: RunOutcome, s: Scenario):
     """At least one audit entry matches the given field filter."""
     matches = _filter_audit_entries(o.audit_entries, a.params)
-    return (len(matches) >= 1, len(matches),
-            f"found {len(matches)} matching audit entries")
+    note = f"found {len(matches)} matching audit entries"
+    if len(matches) == 0:
+        note += _audit_read_failure_hint(o)
+    return (len(matches) >= 1, len(matches), note)
 
 
 def _check_audit_attribution(a: Assertion, o: RunOutcome, s: Scenario):
@@ -64,7 +77,7 @@ def _check_audit_attribution(a: Assertion, o: RunOutcome, s: Scenario):
     expected_uid = a.params.get("actor_uid")
     entries = [e for e in o.audit_entries if tool is None or e.tool == tool]
     if not entries:
-        return (False, None, f"no audit entries for tool={tool}")
+        return (False, None, f"no audit entries for tool={tool}{_audit_read_failure_hint(o)}")
     mismatched = [e for e in entries if e.actor_uid != expected_uid]
     return (not mismatched, [e.actor_uid for e in entries],
             f"{len(mismatched)}/{len(entries)} entries had wrong actor")
@@ -76,7 +89,7 @@ def _check_delegation_chain(a: Assertion, o: RunOutcome, s: Scenario):
     expected_chain = a.params.get("chain", [])
     entries = [e for e in o.audit_entries if tool is None or e.tool == tool]
     if not entries:
-        return (False, None, f"no audit entries for tool={tool}")
+        return (False, None, f"no audit entries for tool={tool}{_audit_read_failure_hint(o)}")
     bad = [e for e in entries if e.delegation_chain != expected_chain]
     return (not bad, [e.delegation_chain for e in entries],
             f"{len(bad)}/{len(entries)} had wrong chain")
@@ -114,7 +127,7 @@ def _check_audit_field_present(a: Assertion, o: RunOutcome, s: Scenario):
     tool = a.params.get("tool")
     entries = [e for e in o.audit_entries if tool is None or e.tool == tool]
     if not entries:
-        return (False, None, f"no audit entries for tool={tool}")
+        return (False, None, f"no audit entries for tool={tool}{_audit_read_failure_hint(o)}")
     missing: list[tuple[int, str]] = []
     for i, e in enumerate(entries):
         for f in required:
