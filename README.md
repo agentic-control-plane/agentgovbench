@@ -64,7 +64,7 @@ pip install -e .
 agentgovbench run --runner vanilla
 ```
 
-Expected: **13/48**. Shows the harness, scorer, and scenario library are working.
+Expected: **13/48** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
 
 ### 2. Reproduce the ACP scorecard (zero Firebase, ~5 minutes)
 
@@ -80,11 +80,11 @@ export ACP_TENANT_SLUG=your-tenant-slug
 agentgovbench run --runner acp_api --out results/acp-api.json
 ```
 
-Expected: **46/48** against `api.agenticcontrolplane.com`, with 2 documented declinations (the two cross-tenant scenarios that require multi-tenant deployment mode). Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+Expected: **46/48** against `api.agenticcontrolplane.com`, with **5 declinations documented in the runner manifest** ([`results/acp_api-v0.1.0-live.json`](results/acp_api-v0.1.0-live.json)) — three of those still pass their checkable criteria; the two that don't are the cross-tenant scenarios, which require multi-tenant deployment mode. Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
 
 > **Scoring much lower than expected (e.g. 18/48)?** The most common cause is a missing scope on your API key. Symptoms: `audit_completeness 0/6`, lots of `tool_allowed: some calls were denied`, and a single `runner_errors_empty: ['audit GET 403: api key lacks admin.audit.read scope']`. Mint a new key with the scopes above and rerun.
 
-### 3. Run any of the seven framework runners
+### 3. Run any framework — seven frameworks, each with a native and an ACP runner
 
 ```bash
 agentgovbench run --runner crewai_native                # CrewAI without governance — baseline
@@ -123,7 +123,7 @@ Same gateway. Same scenarios. Same scorer. The spread is architectural, not prod
 - **Framework-agnostic** — scenarios don't assume CrewAI, LangGraph, Claude, etc. They describe actions and expected governance outcomes.
 - **Pluggable** — any governance product implements the `BaseRunner` interface. No ACP assumptions in the scenarios.
 - **Versioned** — each scenario carries a version. Old results remain comparable; new scenarios extend the set without breaking history.
-- **Published honest** — the reference ACP runner declines 3 scenarios in its own scorecard. A benchmark that says *"we pass everything"* isn't credible.
+- **Published honest** — the reference ACP runner declares 5 declinations in its own committed result file, reasons included (single-tenant runner scope, one capability ACP doesn't have yet). A benchmark that says *"we pass everything"* isn't credible.
 
 ## Submitting results for your product
 
@@ -137,7 +137,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklis
 
 ## Status
 
-**v0.2** — 48 scenarios across 8 categories. Reference ACP runner passes 45/48 with 3 documented declinations. Seven framework runners shipped. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
+**v0.2** — 48 scenarios across 8 categories. Reference ACP runner passes 46/48 with 5 documented declinations (see the committed result file). Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
 
 Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We're the first to put a number on our own governance product; we'd like the rest of the space to follow.
 
