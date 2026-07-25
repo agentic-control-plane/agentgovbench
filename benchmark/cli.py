@@ -44,8 +44,8 @@ def _load_runner(name: str) -> BaseRunner:
     return cls()
 
 
-def _result_to_dict(r: ScenarioResult) -> dict:
-    return {
+def _result_to_dict(r: ScenarioResult, include_outcome: bool = False) -> dict:
+    d = {
         "scenario_id": r.scenario_id,
         "scenario_version": r.scenario_version,
         "category": r.category,
@@ -64,6 +64,46 @@ def _result_to_dict(r: ScenarioResult) -> dict:
             for a in r.assertion_results
         ],
     }
+    if include_outcome and r.outcome is not None:
+        # The trajectory — every tool the runner actually attempted, and
+        # whether it went through. Off by default because it carries the
+        # scenario's tool inputs and roughly triples the file size.
+        #
+        # Without it a result says only pass/fail per assertion, which cannot
+        # answer "what did the agent actually DO on the way there". Severity
+        # grading (L0-L6, arXiv:2607.07474) needs the trajectory: a scenario
+        # can pass every assertion while the run still completed a cross-scope
+        # or privilege-expanding action through a tool no assertion watched.
+        d["outcome"] = {
+            "gateway_reachable": r.outcome.gateway_reachable,
+            "runner_errors": list(r.outcome.runner_errors),
+            "tool_outcomes": [
+                {
+                    "tool": t.tool,
+                    "input": t.input,
+                    "as_user": t.as_user,
+                    "as_tenant": t.as_tenant,
+                    "allowed": t.allowed,
+                    "reason": t.reason,
+                    "agent_tier": t.agent_tier,
+                    "agent_name": t.agent_name,
+                }
+                for t in r.outcome.tool_outcomes
+            ],
+            "audit_entries": [
+                {
+                    "timestamp": a.timestamp,
+                    "tenant": a.tenant,
+                    "actor_uid": a.actor_uid,
+                    "tool": a.tool,
+                    "decision": a.decision,
+                    "reason": a.reason,
+                    "delegation_chain": list(a.delegation_chain),
+                }
+                for a in r.outcome.audit_entries
+            ],
+        }
+    return d
 
 
 @click.group()
@@ -80,8 +120,13 @@ def cli() -> None:
 @click.option("--json", "as_json", is_flag=True, help="Print full results JSON to stdout")
 @click.option("--limit", type=int, default=None, help="Cap number of scenarios run")
 @click.option("--verbose", "-v", is_flag=True, help="Print per-scenario outcome")
+@click.option("--include-outcomes", is_flag=True,
+              help="Persist each scenario's trajectory (tool calls attempted + audit "
+                   "entries) into the results JSON. Needed for post-hoc trajectory "
+                   "analysis such as severity grading; off by default because it "
+                   "carries tool inputs and enlarges the file.")
 def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[str],
-        as_json: bool, limit: Optional[int], verbose: bool) -> None:
+        as_json: bool, limit: Optional[int], verbose: bool, include_outcomes: bool) -> None:
     """Run scenarios against a runner."""
     runner_inst = _load_runner(runner)
     scenarios = load_all(scenarios_dir, category=category)
@@ -135,7 +180,7 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 "declined_categories": runner_inst.metadata.declined_categories,
             },
             "aggregate": agg,
-            "results": [_result_to_dict(r) for r in results],
+            "results": [_result_to_dict(r, include_outcomes) for r in results],
         }
         if out:
             Path(out).parent.mkdir(parents=True, exist_ok=True)
