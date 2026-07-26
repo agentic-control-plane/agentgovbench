@@ -545,8 +545,25 @@ class Runner(AcpRunner):
                 for a in scenario.actions
             )
         )
-        if _AcpRunner._prev_scenario_was_rate_heavy and scenario_is_rate_heavy:
-            time.sleep(62)  # 60s sliding window + 2s guard band
+        # A rate-heavy scenario poisons the bucket for EVERY later
+        # scenario that reuses the same user+tier inside the 60s window,
+        # not just the next rate-heavy one — observed as a benign
+        # subagent read in scope_inheritance.06 denied with "63/60 per
+        # minute" ~18s after rate_limit_cascade finished. Cool down
+        # before ANY scenario that starts inside the window.
+        last_heavy_end = getattr(_AcpRunner, "_last_rate_heavy_end_ts", 0.0)
+        elapsed = time.time() - last_heavy_end
+        if last_heavy_end and elapsed < 62:
+            time.sleep(62 - elapsed)  # 60s sliding window + 2s guard band
+        if scenario_is_rate_heavy:
+            # Recorded at teardown-time semantics: the window matters from
+            # the scenario's LAST call, which we approximate as now +
+            # scenario runtime; setting at setup start is conservative
+            # only if we also update after the run — done in
+            # collect_outcome below via the same attribute.
+            _AcpRunner._pending_rate_heavy = True
+        else:
+            _AcpRunner._pending_rate_heavy = False
         _AcpRunner._prev_scenario_was_rate_heavy = scenario_is_rate_heavy
 
         self._scenario_start_ts = time.time()
@@ -559,6 +576,16 @@ class Runner(AcpRunner):
         # scorecard. Skipping them breaks positive assertions that
         # require outcomes.
         self._skip_scenario = scenario.id == "cross_tenant_isolation.02_audit_log_separation"
+
+    def collect_outcome(self):  # type: ignore[override]
+        outcome = super().collect_outcome()
+        # Stamp the end of a rate-heavy scenario so the next setup() can
+        # hold until the gateway's 60s sliding window has actually
+        # drained relative to the LAST call, not the scenario's start.
+        from runners.acp import Runner as _AcpRunner
+        if getattr(_AcpRunner, "_pending_rate_heavy", False):
+            _AcpRunner._last_rate_heavy_end_ts = time.time()
+        return outcome
 
         self._reset_stale_policies()
 
