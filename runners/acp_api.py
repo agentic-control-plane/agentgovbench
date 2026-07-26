@@ -577,6 +577,14 @@ class Runner(AcpRunner):
         # require outcomes.
         self._skip_scenario = scenario.id == "cross_tenant_isolation.02_audit_log_separation"
 
+        self._reset_stale_policies()
+
+        all_policies = self._scenario_policy_to_acp(scenario)
+        for _tid, policy in all_policies.items():
+            self._write_policy(self._tenant_slug, policy)
+
+        time.sleep(0.3)  # let writes settle
+
     def collect_outcome(self):  # type: ignore[override]
         outcome = super().collect_outcome()
         # Stamp the end of a rate-heavy scenario so the next setup() can
@@ -586,14 +594,6 @@ class Runner(AcpRunner):
         if getattr(_AcpRunner, "_pending_rate_heavy", False):
             _AcpRunner._last_rate_heavy_end_ts = time.time()
         return outcome
-
-        self._reset_stale_policies()
-
-        all_policies = self._scenario_policy_to_acp(scenario)
-        for _tid, policy in all_policies.items():
-            self._write_policy(self._tenant_slug, policy)
-
-        time.sleep(0.3)  # let writes settle
 
     def _reset_stale_policies(self) -> None:
         """DELETE workspace policy and per-user policy docs for every
