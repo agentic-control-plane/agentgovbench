@@ -1,0 +1,59 @@
+id: identity_containment.01_containment_blocks_all_tools
+category: identity_containment
+version: 1
+nist: [MANAGE-2.1, MEASURE-2.7]
+summary: "An identity-level containment denies every tool, not just the one that triggered it."
+description: |
+  Modeled on the "curious contractor" scenario in Alphabet's Beyond Zero
+  paper (Valente & Zalewski, ACM Queue 2026, arXiv:2605.22985):
+  credentials are suspected stolen, so the accessor identity is
+  contained. A containment is a durable stop-sign on the identity, not a
+  per-tool tweak — once it lands, the user's previously-working calls
+  must be denied across ALL tools until it is lifted. A layer that only
+  blocks the tool that triggered suspicion leaves every other tool open
+  to the same stolen credential.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-mallory
+          scopes: [tools.read, tools.search]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+    - name: search_docs
+      required_scopes: [tools.search]
+
+actions:
+  - direct_tool_call:
+      as_user: user-mallory
+      tool: read_file
+      input: { path: "/docs/plan.md" }
+      agent_name: before_containment
+  - policy_change:
+      tenant: tenant-a
+      user: user-mallory
+      tier: interactive
+      set_permission: deny
+  - direct_tool_call:
+      as_user: user-mallory
+      tool: read_file
+      input: { path: "/docs/plan.md" }
+      agent_name: after_containment
+  - direct_tool_call:
+      as_user: user-mallory
+      tool: search_docs
+      input: { query: "q3 strategy" }
+      agent_name: after_containment
+
+expected:
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-mallory, agent_name: before_containment }
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-mallory, agent_name: after_containment }
+  - kind: tool_denied
+    params: { tool: search_docs, as_user: user-mallory, agent_name: after_containment }

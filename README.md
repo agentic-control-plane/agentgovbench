@@ -7,14 +7,14 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/Scenarios-48-5B5BD6" alt="48 scenarios" />
+  <img src="https://img.shields.io/badge/Scenarios-51-5B5BD6" alt="51 scenarios" />
   <img src="https://img.shields.io/badge/Framework%20runners-7-5B5BD6" alt="7 runners" />
   <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/NIST%20AI%20RMF-1.0-4285F4" alt="NIST AI RMF 1.0" /></a>
 </p>
 
 <p align="center">
   <a href="https://agenticcontrolplane.com/benchmark">Live scorecard</a> ·
-  <a href="https://agenticcontrolplane.com/benchmark/scenarios">All 48 scenarios</a> ·
+  <a href="https://agenticcontrolplane.com/benchmark/scenarios">All 51 scenarios</a> ·
   <a href="https://agenticcontrolplane.com/blog/how-we-test-agent-governance">Methodology</a> ·
   <a href="https://agenticcontrolplane.com/blog/architecture-is-governance">Architecture-is-governance</a> ·
   <a href="https://agenticcontrolplane.com">agenticcontrolplane.com</a>
@@ -35,7 +35,7 @@ Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **mode
                                          (logs enough to reconstruct?)
 ```
 
-Eight categories, each mapped to one or more <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">NIST AI RMF 1.0</a> controls:
+Nine categories, each mapped to one or more <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">NIST AI RMF 1.0</a> controls:
 
 | # | Category | What breaks if this fails | NIST |
 |---|---|---|---|
@@ -47,8 +47,9 @@ Eight categories, each mapped to one or more <a href="https://doi.org/10.6028/NI
 | 6 | **Audit completeness** | Actions happen without logs, or logs lack detail for forensic reconstruction | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.3</a> |
 | 7 | **Fail-mode discipline** | Gateway failure → system defaults to fail-open when policy says fail-closed (or vice versa) | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.1</a> |
 | 8 | **Cross-tenant isolation** | Tenant A's agent observes or affects tenant B's data | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">GOVERN-1.2</a> |
+| 9 | **Identity containment** | A flagged identity keeps acting: containment isn't identity-wide, isn't audited, or can't be lifted cleanly | <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MANAGE-2.1</a>, <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">MEASURE-2.7</a> |
 
-Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full control mapping: [`NIST_MAPPING.md`](NIST_MAPPING.md). All 48 scenarios with expected outcomes: [`scenarios/`](scenarios/).
+Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full control mapping: [`NIST_MAPPING.md`](NIST_MAPPING.md). All 51 scenarios with expected outcomes: [`scenarios/`](scenarios/).
 
 ## Quickstart
 
@@ -64,7 +65,7 @@ pip install -e .
 agentgovbench run --runner vanilla
 ```
 
-Expected: **13/48** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
+Expected: **13/51** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
 
 ### 2. Reproduce the ACP scorecard (zero Firebase, ~5 minutes)
 
@@ -117,6 +118,8 @@ We ran every runner against the same backend and published every scorecard. The 
 
 Same gateway. Same scenarios. Same scorer. The spread is architectural, not product-quality. [Full walkthrough →](https://agenticcontrolplane.com/blog/architecture-is-governance)
 
+> Published scores above are against the v0.2 48-scenario set. The `identity_containment` category (3 scenarios, added after Alphabet's [Beyond Zero](https://arxiv.org/abs/2605.22985) paper) is not yet reflected in these numbers; denominators move to /51 at the next full re-run.
+
 ## Design principles
 
 - **Deterministic** — no LLM in the hot path. Scenarios fully describe the agent action sequence; governance is tested on what it does with those actions. Reproducible byte-for-byte across runs.
@@ -136,6 +139,8 @@ We want your product represented. The ACP team built this benchmark, but the sce
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklist.
 
 ## Status
+
+**v0.3 (in progress)** — adds the `identity_containment` category (3 scenarios): durable identity-level stop-signs, audited denials under containment, and clean containment lift. Drawn from the attacker scenarios in Alphabet's [Beyond Zero](https://arxiv.org/abs/2605.22985) paper (Valente & Zalewski, ACM Queue 2026); expressed with existing benchmark primitives, so all runners work unmodified. Framework scorecards not yet re-run against the 51-scenario set.
 
 **v0.2** — 48 scenarios across 8 categories. Reference ACP runner passes 46/48 with 5 documented declinations (see the committed result file). Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
 

@@ -87,7 +87,7 @@ A scenario is a YAML file at `scenarios/<category>/NN_descriptive_name.yaml`. Nu
 
 ```yaml
 id: <category>.NN_descriptive_name     # unique; matches path
-category: <category>                    # one of the 8 categories
+category: <category>                    # one of the 9 categories
 version: 1                              # bump on breaking changes
 nist: [ONE_OR_MORE, NIST, CONTROLS]    # list primary first
 summary: "One-line description"

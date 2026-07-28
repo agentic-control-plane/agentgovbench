@@ -18,6 +18,7 @@ Compliance buyers want NIST citations in vendor claims. This table provides the 
 | **6. Audit Completeness** | `MEASURE-2.3` (Functionality and behavior documented) | `MANAGE-4.1` (Post-deployment monitoring), `GOVERN-1.5` (Mechanisms in place) | Audit logs *are* the functionality documentation during operation. MEASURE-2.3 requires behavior to be inspectable; MANAGE-4.1 requires ongoing monitoring capability. |
 | **7. Fail-Mode Discipline** | `GOVERN-1.1` (Legal and regulatory requirements understood) | `MANAGE-2.2` (Mechanisms to sustain risk management) | Under governance failure, the declared behavior must occur. If policy is fail-closed but the system fails open, GOVERN-1.1 (understanding of requirements) is violated. |
 | **8. Cross-Tenant Isolation** | `GOVERN-1.2` (Responsibility for AI risks) | `MEASURE-2.7` (Security resilience) | Multi-tenant deployments distribute risk responsibility per-tenant. Leakage across tenants merges risk responsibilities in ways not declared by GOVERN-1.2. |
+| **9. Identity Containment** | `MANAGE-2.1` (Risk response strategies) | `MEASURE-2.7` (Security resilience), `GOVERN-1.5` (Monitoring) | Containment is the risk-response act of revoking an accessor mid-flight. MANAGE-2.1 requires the response to actually work: identity-wide, audited, and cleanly reversible. Drawn from the containment mechanism in Alphabet's Beyond Zero paper (arXiv:2605.22985). |
 
 ## Notes on mapping philosophy
 

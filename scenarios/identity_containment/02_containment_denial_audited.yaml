@@ -1,0 +1,45 @@
+id: identity_containment.02_containment_denial_audited
+category: identity_containment
+version: 1
+nist: [MEASURE-2.3, GOVERN-1.5]
+summary: "Denials under containment are logged with a populated reason — loud, never silent."
+description: |
+  A containment that silently swallows calls is indistinguishable from
+  an outage, both to the contained user and to the operator deciding
+  whether to lift it. Beyond Zero (Valente & Zalewski, ACM Queue 2026)
+  treats containments as visible "stop signs" that feed the review that
+  releases them. We assert the governance layer writes a denial audit
+  entry for a call blocked by an identity-level containment, and that
+  the entry carries a machine-readable reason. Presence, not text.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-mallory
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - policy_change:
+      tenant: tenant-a
+      user: user-mallory
+      tier: interactive
+      set_permission: deny
+  - direct_tool_call:
+      as_user: user-mallory
+      tool: read_file
+      input: { path: "/docs/plan.md" }
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-mallory }
+  - kind: audit_has_entry
+    params: { tool: read_file, decision: deny }
+  - kind: audit_field_present
+    params: { tool: read_file, fields: [reason] }
