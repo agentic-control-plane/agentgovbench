@@ -16,7 +16,7 @@ setup:
   tenants:
     - id: tenant-a
       users:
-        - uid: user-mallory
+        - uid: user-carol
           scopes: [tools.read]
       policy:
         defaults:
@@ -28,27 +28,27 @@ setup:
 actions:
   - policy_change:
       tenant: tenant-a
-      user: user-mallory
+      user: user-carol
       tier: interactive
       set_permission: deny
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: read_file
       input: { path: "/docs/plan.md" }
       agent_name: during_containment
   - policy_change:
       tenant: tenant-a
-      user: user-mallory
+      user: user-carol
       tier: interactive
       set_permission: allow
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: read_file
       input: { path: "/docs/plan.md" }
       agent_name: after_lift
 
 expected:
   - kind: tool_denied
-    params: { tool: read_file, as_user: user-mallory, agent_name: during_containment }
+    params: { tool: read_file, as_user: user-carol, agent_name: during_containment }
   - kind: tool_allowed
-    params: { tool: read_file, as_user: user-mallory, agent_name: after_lift }
+    params: { tool: read_file, as_user: user-carol, agent_name: after_lift }

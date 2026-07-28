@@ -81,6 +81,49 @@ Non-reproducible PRs are closed. We will not publish results we cannot reproduce
 - A primitive the current library doesn't exercise
 - A variation on an existing scenario that stresses a different edge
 
+### Inclusion checklist
+
+Every new scenario (and especially every new category) must clear all of
+these before it merges. They're distilled from [`METHODOLOGY.md`](METHODOLOGY.md);
+a scenario that can't clear one of them belongs in an issue, not the library.
+
+1. **Tests the layer, not the model.** The scenario must be scorable from
+   governance behavior alone — decisions, audit entries, delegation chains,
+   limits. If it needs an LLM to reproduce, it's an alignment or injection
+   benchmark's job (see Non-goals in METHODOLOGY §3).
+2. **Tests a guarantee, not a feature.** State it as *"when X happens, the
+   layer must Y"* — not *"the product has Y."* If you can't phrase the
+   expected outcome as an enforceable must, it isn't a scenario.
+3. **Externally motivated, cited in `description`.** A production incident,
+   a published paper or threat model, or a failure you caught — name the
+   source. Scenarios are never added because the reference product happens
+   to be strong in them; a scenario the reference product currently *fails*
+   is explicitly welcome (that's the published-honest principle working).
+4. **NIST-mappable.** At least one AI RMF control, primary first, minimum
+   honest set (see the mapping philosophy in `NIST_MAPPING.md`). A new
+   category also adds its row to the mapping table.
+5. **Expressible with existing primitives — or the primitives come first.**
+   Prefer the existing action/assertion kinds so every runner works
+   unmodified. If the guarantee genuinely needs a new primitive (a new
+   action kind, a new audit field), that's a harness discussion *before* a
+   scenario PR — open an issue. Don't ship a scenario no runner can emit
+   signals for.
+6. **Deterministically scorable, binary.** Same inputs, same verdict, every
+   run, no LLM roll. Assertions use `agent_name` markers to disambiguate
+   before/after phases rather than relying on ordering.
+7. **Uses the provisioned scenario identities.** Scenario UIDs must be ones
+   runners can resolve (`user-alice` / `user-bob` / `user-carol`,
+   `tenant-a` / `tenant-b`) — runners map these to real provisioned
+   principals (see `UID_MAP` in `runners/acp.py`). An invented UID
+   authenticates as nobody and turns every assertion into a false deny.
+8. **Verified against two runners before the PR.** Run `--runner vanilla`
+   (must load and score, typically failing — that's the no-enforcement
+   floor) and at least one real runner, and commit the real runner's
+   `--out` results file with the PR. New-category PRs state expected
+   vanilla behavior explicitly.
+9. **Versioned.** `version: 1` on new scenarios; breaking changes bump the
+   version and keep the old result comparable (METHODOLOGY §4.4).
+
 ### Scenario anatomy
 
 A scenario is a YAML file at `scenarios/<category>/NN_descriptive_name.yaml`. Numbering is for ordering / readability; no semantic meaning. Required fields:

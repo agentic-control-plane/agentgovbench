@@ -16,7 +16,7 @@ setup:
   tenants:
     - id: tenant-a
       users:
-        - uid: user-mallory
+        - uid: user-carol
           scopes: [tools.read]
       policy:
         defaults:
@@ -28,17 +28,17 @@ setup:
 actions:
   - policy_change:
       tenant: tenant-a
-      user: user-mallory
+      user: user-carol
       tier: interactive
       set_permission: deny
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: read_file
       input: { path: "/docs/plan.md" }
 
 expected:
   - kind: tool_denied
-    params: { tool: read_file, as_user: user-mallory }
+    params: { tool: read_file, as_user: user-carol }
   - kind: audit_has_entry
     params: { tool: read_file, decision: deny }
   - kind: audit_field_present

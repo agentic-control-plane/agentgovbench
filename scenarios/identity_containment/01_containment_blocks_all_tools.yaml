@@ -17,7 +17,7 @@ setup:
   tenants:
     - id: tenant-a
       users:
-        - uid: user-mallory
+        - uid: user-carol
           scopes: [tools.read, tools.search]
       policy:
         defaults:
@@ -30,30 +30,30 @@ setup:
 
 actions:
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: read_file
       input: { path: "/docs/plan.md" }
       agent_name: before_containment
   - policy_change:
       tenant: tenant-a
-      user: user-mallory
+      user: user-carol
       tier: interactive
       set_permission: deny
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: read_file
       input: { path: "/docs/plan.md" }
       agent_name: after_containment
   - direct_tool_call:
-      as_user: user-mallory
+      as_user: user-carol
       tool: search_docs
       input: { query: "q3 strategy" }
       agent_name: after_containment
 
 expected:
   - kind: tool_allowed
-    params: { tool: read_file, as_user: user-mallory, agent_name: before_containment }
+    params: { tool: read_file, as_user: user-carol, agent_name: before_containment }
   - kind: tool_denied
-    params: { tool: read_file, as_user: user-mallory, agent_name: after_containment }
+    params: { tool: read_file, as_user: user-carol, agent_name: after_containment }
   - kind: tool_denied
-    params: { tool: search_docs, as_user: user-mallory, agent_name: after_containment }
+    params: { tool: search_docs, as_user: user-carol, agent_name: after_containment }
