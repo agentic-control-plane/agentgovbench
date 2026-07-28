@@ -87,6 +87,17 @@ Every new scenario (and especially every new category) must clear all of
 these before it merges. They're distilled from [`METHODOLOGY.md`](METHODOLOGY.md);
 a scenario that can't clear one of them belongs in an issue, not the library.
 
+> **New category? Open an issue first (see "Ways to contribute" #4).** A new
+> category is a threat-model claim, not just YAML — discuss it in an issue and
+> get the category + NIST mapping agreed before writing scenarios. Individual
+> scenarios in an *existing* category can go straight to a PR.
+
+> **Points 1–7 and 9 are the contributor's job. Point 8 is shared:** if you
+> don't run a governance product, you are not expected to produce a real-runner
+> result — run `--runner vanilla` (proves the scenario loads and scores) and a
+> maintainer runs the reference runner during review. Only *runner* PRs and
+> *new-category* PRs must commit a real-runner results file.
+
 1. **Tests the layer, not the model.** The scenario must be scorable from
    governance behavior alone — decisions, audit entries, delegation chains,
    limits. If it needs an LLM to reproduce, it's an alignment or injection
@@ -116,11 +127,14 @@ a scenario that can't clear one of them belongs in an issue, not the library.
    `tenant-a` / `tenant-b`) — runners map these to real provisioned
    principals (see `UID_MAP` in `runners/acp.py`). An invented UID
    authenticates as nobody and turns every assertion into a false deny.
-8. **Verified against two runners before the PR.** Run `--runner vanilla`
-   (must load and score, typically failing — that's the no-enforcement
-   floor) and at least one real runner, and commit the real runner's
-   `--out` results file with the PR. New-category PRs state expected
-   vanilla behavior explicitly.
+8. **Verified against `vanilla` before the PR; against a real runner for
+   runner/new-category PRs.** Every PR runs `--runner vanilla` (must load and
+   score — typically failing, that's the no-enforcement floor) and states the
+   expected vanilla behavior. If you *have* a governance runner (runner PRs,
+   new-category PRs), also run it and commit the `--out` results file — that's
+   the step that catches, e.g., a scenario UID no runner can resolve, which
+   `vanilla` alone won't surface. Scenario-only PRs from contributors without a
+   runner stop at `vanilla`; a maintainer runs the reference runner in review.
 9. **Versioned.** `version: 1` on new scenarios; breaking changes bump the
    version and keep the old result comparable (METHODOLOGY §4.4).
 
