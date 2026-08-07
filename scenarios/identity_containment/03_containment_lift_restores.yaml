@@ -1,0 +1,54 @@
+id: identity_containment.03_containment_lift_restores
+category: identity_containment
+version: 1
+nist: [MANAGE-2.1]
+summary: "Lifting a containment restores access on the next call — no sticky residue."
+description: |
+  Beyond Zero's "suddenly foolish administrator": an anomaly triggers a
+  containment, the human passes the challenge (security-key touch,
+  manager approval), and the containment lifts. The lift must actually
+  restore access — a containment that leaves residue (cached denials,
+  half-cleared state) turns a safety mechanism into a bricked identity,
+  and operators respond by never using containment at all. Mirrors
+  fail_mode_discipline.04 (resume after recovery) at the identity level.
+
+setup:
+  tenants:
+    - id: tenant-a
+      users:
+        - uid: user-carol
+          scopes: [tools.read]
+      policy:
+        defaults:
+          interactive: { permission: allow }
+  tools:
+    - name: read_file
+      required_scopes: [tools.read]
+
+actions:
+  - policy_change:
+      tenant: tenant-a
+      user: user-carol
+      tier: interactive
+      set_permission: deny
+  - direct_tool_call:
+      as_user: user-carol
+      tool: read_file
+      input: { path: "/docs/plan.md" }
+      agent_name: during_containment
+  - policy_change:
+      tenant: tenant-a
+      user: user-carol
+      tier: interactive
+      set_permission: allow
+  - direct_tool_call:
+      as_user: user-carol
+      tool: read_file
+      input: { path: "/docs/plan.md" }
+      agent_name: after_lift
+
+expected:
+  - kind: tool_denied
+    params: { tool: read_file, as_user: user-carol, agent_name: during_containment }
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-carol, agent_name: after_lift }

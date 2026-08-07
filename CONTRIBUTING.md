@@ -81,13 +81,70 @@ Non-reproducible PRs are closed. We will not publish results we cannot reproduce
 - A primitive the current library doesn't exercise
 - A variation on an existing scenario that stresses a different edge
 
+### Inclusion checklist
+
+Every new scenario (and especially every new category) must clear all of
+these before it merges. They're distilled from [`METHODOLOGY.md`](METHODOLOGY.md);
+a scenario that can't clear one of them belongs in an issue, not the library.
+
+> **New category? Open an issue first (see "Ways to contribute" #4).** A new
+> category is a threat-model claim, not just YAML — discuss it in an issue and
+> get the category + NIST mapping agreed before writing scenarios. Individual
+> scenarios in an *existing* category can go straight to a PR.
+
+> **Points 1–7 and 9 are the contributor's job. Point 8 is shared:** if you
+> don't run a governance product, you are not expected to produce a real-runner
+> result — run `--runner vanilla` (proves the scenario loads and scores) and a
+> maintainer runs the reference runner during review. Only *runner* PRs and
+> *new-category* PRs must commit a real-runner results file.
+
+1. **Tests the layer, not the model.** The scenario must be scorable from
+   governance behavior alone — decisions, audit entries, delegation chains,
+   limits. If it needs an LLM to reproduce, it's an alignment or injection
+   benchmark's job (see Non-goals in METHODOLOGY §3).
+2. **Tests a guarantee, not a feature.** State it as *"when X happens, the
+   layer must Y"* — not *"the product has Y."* If you can't phrase the
+   expected outcome as an enforceable must, it isn't a scenario.
+3. **Externally motivated, cited in `description`.** A production incident,
+   a published paper or threat model, or a failure you caught — name the
+   source. Scenarios are never added because the reference product happens
+   to be strong in them; a scenario the reference product currently *fails*
+   is explicitly welcome (that's the published-honest principle working).
+4. **NIST-mappable.** At least one AI RMF control, primary first, minimum
+   honest set (see the mapping philosophy in `NIST_MAPPING.md`). A new
+   category also adds its row to the mapping table.
+5. **Expressible with existing primitives — or the primitives come first.**
+   Prefer the existing action/assertion kinds so every runner works
+   unmodified. If the guarantee genuinely needs a new primitive (a new
+   action kind, a new audit field), that's a harness discussion *before* a
+   scenario PR — open an issue. Don't ship a scenario no runner can emit
+   signals for.
+6. **Deterministically scorable, binary.** Same inputs, same verdict, every
+   run, no LLM roll. Assertions use `agent_name` markers to disambiguate
+   before/after phases rather than relying on ordering.
+7. **Uses the provisioned scenario identities.** Scenario UIDs must be ones
+   runners can resolve (`user-alice` / `user-bob` / `user-carol`,
+   `tenant-a` / `tenant-b`) — runners map these to real provisioned
+   principals (see `UID_MAP` in `runners/acp.py`). An invented UID
+   authenticates as nobody and turns every assertion into a false deny.
+8. **Verified against `vanilla` before the PR; against a real runner for
+   runner/new-category PRs.** Every PR runs `--runner vanilla` (must load and
+   score — typically failing, that's the no-enforcement floor) and states the
+   expected vanilla behavior. If you *have* a governance runner (runner PRs,
+   new-category PRs), also run it and commit the `--out` results file — that's
+   the step that catches, e.g., a scenario UID no runner can resolve, which
+   `vanilla` alone won't surface. Scenario-only PRs from contributors without a
+   runner stop at `vanilla`; a maintainer runs the reference runner in review.
+9. **Versioned.** `version: 1` on new scenarios; breaking changes bump the
+   version and keep the old result comparable (METHODOLOGY §4.4).
+
 ### Scenario anatomy
 
 A scenario is a YAML file at `scenarios/<category>/NN_descriptive_name.yaml`. Numbering is for ordering / readability; no semantic meaning. Required fields:
 
 ```yaml
 id: <category>.NN_descriptive_name     # unique; matches path
-category: <category>                    # one of the 8 categories
+category: <category>                    # one of the 9 categories
 version: 1                              # bump on breaking changes
 nist: [ONE_OR_MORE, NIST, CONTROLS]    # list primary first
 summary: "One-line description"

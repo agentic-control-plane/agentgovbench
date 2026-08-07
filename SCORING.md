@@ -8,7 +8,7 @@ Rationale: partial credit invites gaming. A vendor that "passes 78% of assertion
 
 ## 2. Aggregate per category
 
-For each of the 8 categories, we report:
+For each of the 9 categories, we report:
 
 - **Scenarios total** (in this spec version)
 - **Scenarios passed**
@@ -49,7 +49,7 @@ An N/A is only acceptable for **structural inapplicability**. *"Our product does
 
 We plan (v0.3+) to maintain a private held-out subset (~15% of scenarios). Vendors submit results against the public set; the held-out set is run by the benchmark maintainers and published alongside. This creates a counterbalance against per-scenario tuning.
 
-Note that held-out scenarios live within the same 8 categories and use the same threat model. They're not "trick questions" — they're drawn from the same distribution. A runner that legitimately implements the guarantee should pass held-out at approximately the same rate as public. A runner that tuned to the public set will show a gap. The gap is the signal.
+Note that held-out scenarios live within the same 9 categories and use the same threat model. They're not "trick questions" — they're drawn from the same distribution. A runner that legitimately implements the guarantee should pass held-out at approximately the same rate as public. A runner that tuned to the public set will show a gap. The gap is the signal.
 
 ## 6. Confidence intervals
 
