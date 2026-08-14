@@ -178,11 +178,16 @@ class Runner(AcpRunner):
                 "ACP_API_KEY cannot drive this deployment:\n  - "
                 + "\n  - ".join(problems)
                 + f"\n\nTenant slug: {self._tenant_slug}. Base: {self._acp_base_url}."
-                "\nMint a gsk_ key on this deployment with bench.impersonate "
-                "and admin.audit.read (or *), then re-export ACP_API_KEY."
-                "\n\nNote: the gateway returns 'Invalid or revoked API key' for "
-                "both a bad key AND a valid key missing a scope, so this "
-                "message cannot tell you which — check the key's scopes first."
+                "\n\nReading the status code:"
+                "\n  401 'Invalid or revoked API key' -> the key itself is not "
+                "valid. These keys are capped at 24h expiry, so an expired key "
+                "is the most common cause. Mint a new one."
+                "\n  403 'api key lacks <scope>'       -> the key is valid but "
+                "under-scoped. Re-mint with bench.impersonate and "
+                "admin.audit.read (or *)."
+                "\n\nThe dashboard issues empty-scope keys by default; use the "
+                "'AgentGovBench testing (24h, impersonation)' preset on the API "
+                "Keys page, which pre-fills both scopes."
             )
 
     @property
