@@ -629,7 +629,13 @@ class Runner(AcpRunner):
         scenario_tenant = REVERSE_TENANT_SLUG_MAP.get(self._tenant_slug, self._tenant_slug)
 
         for data in raw_entries:
-            tool = data.get("tool") or ""
+            # Prefer the name the agent actually invoked. ACP's `tool` is
+            # the classified name it matched policy on, which since the
+            # harness aliases (#676) can differ from the call — `read_file`
+            # is filed as `Read`. Scenarios assert on what they invoked, so
+            # assert against that; fall back to the classified name on
+            # deployments predating the toolRaw field.
+            tool = data.get("toolRaw") or data.get("tool") or ""
             if not tool:
                 continue
             real_uid = data.get("sub")
