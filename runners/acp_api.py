@@ -82,6 +82,9 @@ class Runner(AcpRunner):
         from benchmark.runner import StatefulRunner
         StatefulRunner.__init__(self)
 
+        # Human session token used ONLY for scenario setup (policy writes).
+        # Separate from the agent credential by design — see _setup_headers.
+        self._admin_token = os.environ.get("ACP_ADMIN_TOKEN", "").strip()
         self._api_key = os.environ.get("ACP_API_KEY", "")
         if not self._api_key:
             raise RuntimeError(
@@ -206,28 +209,40 @@ class Runner(AcpRunner):
         #
         # The probe writes back the document we just read, so it is a
         # no-op on success.
-        try:
-            cur = requests.get(
-                f"{base}/admin/workspacePolicy",
-                headers=self._admin_headers(), timeout=20,
-            )
-            if cur.ok:
-                doc = cur.json() or {}
-                echo = {
-                    "mode": doc.get("mode", "enforce"),
-                    "defaults": doc.get("defaults", {}),
-                    "tools": doc.get("tools", {}),
-                }
-                w = requests.put(
-                    f"{base}/admin/workspacePolicy",
-                    headers=self._admin_headers(), json=echo, timeout=20,
+        #
+        # Skipped in firestore fixture-setup mode: there the operator's own
+        # credentials install policy directly and the API is never asked to
+        # mutate it, which is the whole point of that mode. Probing the HTTP
+        # write here would fail on a deployment that is correctly configured.
+        if self._fs_setup:
+            if self._db is None or not self._tenant_id:
+                problems.append(
+                    "AGB_POLICY_SETUP=firestore but Firestore setup did not "
+                    "initialise — check ADC and the tenant slug."
                 )
-                if w.status_code >= 400:
-                    problems.append(
-                        f"policy WRITE -> HTTP {w.status_code} {w.text[:200]}"
+        else:
+            try:
+                cur = requests.get(
+                    f"{base}/admin/workspacePolicy",
+                    headers=self._admin_headers(), timeout=20,
+                )
+                if cur.ok:
+                    doc = cur.json() or {}
+                    echo = {
+                        "mode": doc.get("mode", "enforce"),
+                        "defaults": doc.get("defaults", {}),
+                        "tools": doc.get("tools", {}),
+                    }
+                    w = requests.put(
+                        f"{base}/admin/workspacePolicy",
+                        headers=self._setup_headers(), json=echo, timeout=20,
                     )
-        except Exception as e:
-            problems.append(f"policy write probe failed: {e!r}")
+                    if w.status_code >= 400:
+                        problems.append(
+                            f"policy WRITE -> HTTP {w.status_code} {w.text[:200]}"
+                        )
+            except Exception as e:
+                problems.append(f"policy write probe failed: {e!r}")
         if problems:
             raise RuntimeError(
                 "ACP_API_KEY cannot drive this deployment:\n  - "
@@ -300,10 +315,46 @@ class Runner(AcpRunner):
     # ── HTTP helpers ───────────────────────────────────────────────────
 
     def _admin_headers(self) -> dict[str, str]:
+        """Agent credential. Exercises the product: tool calls, audit read.
+
+        This is the principal whose behaviour is being measured, and it is
+        deliberately NOT able to write policy — see _setup_headers.
+        """
         return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "X-GS-Client": "agentgovbench-acp-api/0.1.0",
+        }
+
+    def _setup_headers(self) -> dict[str, str]:
+        """Human credential. Installs scenario policy, and nothing else.
+
+        ACP refuses policy writes from API-key principals on principle: an
+        agent must never be able to loosen the rules it runs under. That
+        is the property under test, so the benchmark honours it rather
+        than routing around it — setup authenticates as a signed-in admin,
+        the exercise authenticates as an agent, and the two credentials
+        are never interchanged.
+
+        ACP_ADMIN_TOKEN is a short-lived Firebase ID token belonging to a
+        human who is an admin/owner of the benchmark tenant. Obtain it
+        from a browser session you actually signed in to; do not mint one
+        with a service account, which would re-introduce exactly the
+        bypass this split exists to avoid.
+        """
+        if not self._admin_token:
+            raise RuntimeError(
+                "ACP_ADMIN_TOKEN not set — cannot install scenario policy.\n"
+                "This runner deliberately cannot write policy with its API "
+                "key; ACP forbids it, and that prohibition is one of the "
+                "things the benchmark measures.\n"
+                "Export a Firebase ID token for a signed-in admin of tenant "
+                f"'{self._tenant_slug}'. See docs/reproducing.md."
+            )
+        return {
+            "Authorization": f"Bearer {self._admin_token}",
+            "Content-Type": "application/json",
+            "X-GS-Client": "agentgovbench-acp-api-setup/0.1.0",
         }
 
     def _resolve_tenant(self, scenario_tenant_id: Optional[str]) -> tuple[str, str]:
@@ -331,7 +382,7 @@ class Runner(AcpRunner):
         try:
             r = requests.put(
                 f"{base}/admin/workspacePolicy",
-                headers=self._admin_headers(),
+                headers=self._setup_headers(),
                 json=workspace_body,
                 timeout=10,
             )
@@ -350,7 +401,7 @@ class Runner(AcpRunner):
             try:
                 r = requests.put(
                     f"{base}/admin/userPolicies/{uid}",
-                    headers=self._admin_headers(),
+                    headers=self._setup_headers(),
                     json=body,
                     timeout=10,
                 )
@@ -416,7 +467,7 @@ class Runner(AcpRunner):
         try:
             r = requests.put(
                 f"{self._acp_base_url}/{self._tenant_slug}/admin/userPolicies/{real_uid}",
-                headers=self._admin_headers(),
+                headers=self._setup_headers(),
                 json=body,
                 timeout=10,
             )

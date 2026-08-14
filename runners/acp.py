@@ -601,7 +601,13 @@ class Runner(StatefulRunner):
             inner = DirectToolCall(
                 tool=a.tool, input=a.input,
                 as_user=a.as_user, as_tenant=a.as_tenant,
-                agent_tier="subagent",
+                # Honour the tier the scenario declared. Hardcoding
+                # "subagent" here silently retargeted every tier-specific
+                # rate-limit scenario at the subagent budget, so a
+                # background fan-out was measured against the wrong limit
+                # and appeared to escape enforcement that was never asked
+                # to apply.
+                agent_tier=a.agent_tier,
                 agent_name=f"worker-{i // a.calls_per_worker}",
             )
             last = self._do_direct(inner)
