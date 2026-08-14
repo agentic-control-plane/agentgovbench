@@ -98,6 +98,22 @@ class Runner(AcpRunner):
         )
         # Tenant slug the key was minted for — used to build /:slug/ paths.
         self._tenant_slug = os.environ.get("ACP_TENANT_SLUG", "agentgovbench")
+
+        # ── Second tenant (optional) ───────────────────────────────────
+        # gsk_ keys are tenant-scoped, so acting in two tenants needs two
+        # keys. With ACP_API_KEY_B set, the cross_tenant_isolation
+        # scenarios become measurable instead of collapsing both scenario
+        # tenants onto one real one — which previously made a correctly
+        # isolated deployment look like it leaked, because tenant-a's deny
+        # WAS tenant-b's deny.
+        self._api_key_b = os.environ.get("ACP_API_KEY_B", "").strip()
+        self._tenant_slug_b = os.environ.get(
+            "ACP_TENANT_SLUG_B", TENANT_SLUG_MAP.get("tenant-b", "agentgovbench-b"),
+        )
+        self._multi = bool(self._api_key_b)
+        # Slug currently being routed to; set by _resolve_tenant so the
+        # per-call credential lookup knows which tenant it is acting in.
+        self._current_slug = self._tenant_slug
         # Map known scenario tenant ids to real slugs. Cross-tenant
         # scenarios expect tenant-a and tenant-b to map somewhere;
         # without an explicit second slug we use the primary for both
@@ -132,23 +148,32 @@ class Runner(AcpRunner):
             firebase_admin.initialize_app(options={"projectId": project})
         self._db = fb_firestore.client()
 
-        slug_snap = self._db.document(f"tenantSlugs/{self._tenant_slug}").get()
-        if not slug_snap.exists:
-            raise RuntimeError(
-                f"AGB_POLICY_SETUP=firestore: tenant slug "
-                f"{self._tenant_slug!r} not found in project {project!r}. "
-                "Run setup/bootstrap_tenant.py first."
-            )
-        self._tenant_id = slug_snap.to_dict()["tenantId"]
+        # Resolve every tenant this run will install fixtures into. The
+        # isBenchmarkTenant guard is applied to each one independently —
+        # adding a second tenant must not widen what this mode can touch.
+        self._tenant_ids_by_slug: dict[str, str] = {}
+        wanted = [self._tenant_slug] + ([self._tenant_slug_b] if self._multi else [])
+        for slug in wanted:
+            slug_snap = self._db.document(f"tenantSlugs/{slug}").get()
+            if not slug_snap.exists:
+                raise RuntimeError(
+                    f"AGB_POLICY_SETUP=firestore: tenant slug "
+                    f"{slug!r} not found in project {project!r}. "
+                    "Run setup/bootstrap_tenant.py first."
+                )
+            tid = slug_snap.to_dict()["tenantId"]
 
-        tdoc = self._db.document(f"tenants/{self._tenant_id}").get().to_dict() or {}
-        if tdoc.get("isBenchmarkTenant") is not True:
-            raise RuntimeError(
-                f"AGB_POLICY_SETUP=firestore REFUSED: tenant "
-                f"{self._tenant_slug!r} ({self._tenant_id}) is not marked "
-                "isBenchmarkTenant in Firestore. This mode writes policy "
-                "fixtures and must never touch a real tenant."
-            )
+            tdoc = self._db.document(f"tenants/{tid}").get().to_dict() or {}
+            if tdoc.get("isBenchmarkTenant") is not True:
+                raise RuntimeError(
+                    f"AGB_POLICY_SETUP=firestore REFUSED: tenant "
+                    f"{slug!r} ({tid}) is not marked isBenchmarkTenant in "
+                    "Firestore. This mode writes policy fixtures and must "
+                    "never touch a real tenant."
+                )
+            self._tenant_ids_by_slug[slug] = tid
+
+        self._tenant_id = self._tenant_ids_by_slug[self._tenant_slug]
 
     def preflight(self) -> None:
         """Prove the key can install policy and read audit before scoring.
@@ -291,37 +316,43 @@ class Runner(AcpRunner):
                     "on subagents; parent's effective scope flows to "
                     "children. Product roadmap item."
                 ),
-                "cross_tenant_isolation.02_audit_log_separation": (
-                    "Requires writing to two tenants to test separation. "
-                    "API-key runner is scoped to a single tenant — the one "
-                    "the key was minted for. The reference Firebase-backed "
-                    "runner tests this by writing to both tenants directly."
-                ),
-                "cross_tenant_isolation.03_user_scope_does_not_leak": (
-                    "Requires multi-tenant deployment mode; API-key runner "
-                    "talks to a single tenant."
-                ),
-                "cross_tenant_isolation.05_admin_cannot_cross": (
-                    "Same as 03 — single-tenant API-key runner."
-                ),
                 "per_user_policy_enforcement.03_user_override_beats_workspace": (
                     "Tests user-scope tool-specific overrides; harness + "
                     "runner need types/YAML/write-path support for "
                     "user.tools. Gateway side is ready."
                 ),
+                # Cross-tenant isolation is only declinable while this
+                # runner has one tenant to act in. With ACP_API_KEY_B set,
+                # both scenario tenants map to real, separate tenants and
+                # these become genuine measurements — so the declination
+                # disappears rather than quietly excusing a category the
+                # runner could now test.
+                **({} if self._multi else {
+                    "cross_tenant_isolation.02_audit_log_separation": (
+                        "Requires two tenants to test separation; this run "
+                        "has one API key, so both scenario tenants collapse "
+                        "onto it. Set ACP_API_KEY_B to measure this."
+                    ),
+                    "cross_tenant_isolation.03_user_scope_does_not_leak": (
+                        "Single-tenant run — set ACP_API_KEY_B to measure."
+                    ),
+                    "cross_tenant_isolation.05_admin_cannot_cross": (
+                        "Single-tenant run — set ACP_API_KEY_B to measure."
+                    ),
+                }),
             },
         )
 
     # ── HTTP helpers ───────────────────────────────────────────────────
 
-    def _admin_headers(self) -> dict[str, str]:
-        """Agent credential. Exercises the product: tool calls, audit read.
+    def _admin_headers(self, slug: Optional[str] = None) -> dict[str, str]:
+        """Agent credential for `slug` (default: the primary tenant).
 
         This is the principal whose behaviour is being measured, and it is
         deliberately NOT able to write policy — see _setup_headers.
         """
         return {
-            "Authorization": f"Bearer {self._api_key}",
+            "Authorization": f"Bearer {self._key_for(slug or self._tenant_slug)}",
             "Content-Type": "application/json",
             "X-GS-Client": "agentgovbench-acp-api/0.1.0",
         }
@@ -357,21 +388,46 @@ class Runner(AcpRunner):
             "X-GS-Client": "agentgovbench-acp-api-setup/0.1.0",
         }
 
+    def _slug_for(self, scenario_tenant_id: Optional[str]) -> str:
+        """Map a scenario tenant id onto a real tenant slug.
+
+        Single-key mode collapses everything onto the primary tenant, which
+        is why cross-tenant isolation is declined there: with both scenario
+        tenants pointing at one real tenant, a correct deployment is
+        indistinguishable from a leaking one.
+        """
+        if self._multi and TENANT_SLUG_MAP.get(scenario_tenant_id or "") == \
+                TENANT_SLUG_MAP.get("tenant-b"):
+            return self._tenant_slug_b
+        return self._tenant_slug
+
+    def _key_for(self, slug: str) -> str:
+        """The agent credential valid in `slug`. Keys are tenant-scoped."""
+        if self._multi and slug == self._tenant_slug_b:
+            return self._api_key_b
+        return self._api_key
+
     def _resolve_tenant(self, scenario_tenant_id: Optional[str]) -> tuple[str, str]:
-        # API runner talks to exactly one tenant (the key's). All scenario
-        # tenant ids resolve to that single slug. Cross-tenant scenarios
-        # are declined above.
-        return self._tenant_slug, self._tenant_slug
+        slug = self._slug_for(scenario_tenant_id)
+        # Remember the target so _id_token_for picks the matching key —
+        # the parent computes the tenant before it asks for a token.
+        self._current_slug = slug
+        return slug, slug
 
     # ── Policy write — via /admin endpoints ────────────────────────────
 
     def _write_policy(self, tenant_id: str, policy: dict[str, Any]) -> None:
         """Write workspace + per-user policies via the admin REST API,
         or via Firestore Admin when AGB_POLICY_SETUP=firestore."""
+        # `tenant_id` is the slug _scenario_policy_to_acp keyed the doc by
+        # (see _resolve_tenant, which returns slug for both halves). Route
+        # each tenant's policy to that tenant rather than collapsing every
+        # scenario tenant onto the primary.
+        slug = tenant_id or self._tenant_slug
         if self._fs_setup:
-            self._write_policy_firestore(policy)
+            self._write_policy_firestore(policy, slug)
             return
-        base = f"{self._acp_base_url}/{self._tenant_slug}"
+        base = f"{self._acp_base_url}/{slug}"
 
         # Workspace policy (defaults + tools).
         workspace_body = {
@@ -412,20 +468,22 @@ class Runner(AcpRunner):
             except requests.RequestException as e:
                 self._errors.append(f"userPolicies PUT {uid} failed: {e!r}")
 
-    def _write_policy_firestore(self, policy: dict[str, Any]) -> None:
+    def _write_policy_firestore(self, policy: dict[str, Any],
+                                slug: Optional[str] = None) -> None:
         """Mirror of runners/acp._write_policy: full-doc set() replaces
         whatever the prior scenario wrote, so no DELETE pass is needed
         for the workspace doc."""
         from firebase_admin import firestore as fb_firestore
 
-        ref = self._db.document(f"tenants/{self._tenant_id}/policies/governance")
+        tid = self._tenant_ids_by_slug.get(slug or self._tenant_slug, self._tenant_id)
+        ref = self._db.document(f"tenants/{tid}/policies/governance")
         ref.set({
             **policy,
             "updatedBy": "agentgovbench-runner",
             "updatedAt": fb_firestore.SERVER_TIMESTAMP,
         })
         for uid, user_doc in (policy.get("users", {}) or {}).items():
-            uref = self._db.document(f"tenants/{self._tenant_id}/userPolicies/{uid}")
+            uref = self._db.document(f"tenants/{tid}/userPolicies/{uid}")
             uref.set({
                 **user_doc,
                 "updatedBy": "agentgovbench-runner",
@@ -491,7 +549,9 @@ class Runner(AcpRunner):
             return None
         # Otherwise: the "token" is the API key for every impersonated
         # call; the target uid rides in the body as impersonate_uid.
-        return self._api_key
+        # Keys are tenant-scoped, so pick the one valid in the tenant the
+        # parent just resolved for this call.
+        return self._key_for(self._current_slug)
 
     def execute_action(self, action: Action) -> Optional[ToolOutcome]:  # type: ignore[override]
         # Skip scenarios in declined_categories — we can't test them
@@ -605,30 +665,40 @@ class Runner(AcpRunner):
             datetime.fromtimestamp(self._scenario_start_ts - 1, tz=timezone.utc)
             .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         )
-        try:
-            r = requests.get(
-                f"{self._acp_base_url}/{self._tenant_slug}/admin/audit",
-                params={"since": since_iso, "limit": 500},
-                headers=self._admin_headers(),
-                timeout=15,
-            )
-        except requests.RequestException as e:
-            self._errors.append(f"audit GET failed: {e!r}")
-            return list(self._local_audit_entries)
-        if not r.ok:
-            self._errors.append(f"audit GET {r.status_code}: {r.text[:200]}")
-            return list(self._local_audit_entries)
-
-        try:
-            payload = r.json() or {}
-        except ValueError:
-            return list(self._local_audit_entries)
-
-        raw_entries = payload.get("entries", []) or []
+        # Read every tenant this run can act in. With one key that is just
+        # the primary; with a second key the cross-tenant scenarios need
+        # both logs, and each entry must be attributed to the tenant it
+        # actually came from — reading only the primary would report
+        # tenant-b's activity as missing rather than as isolated.
+        slugs = [self._tenant_slug] + ([self._tenant_slug_b] if self._multi else [])
         entries: list[AuditEntry] = list(self._local_audit_entries)
-        scenario_tenant = REVERSE_TENANT_SLUG_MAP.get(self._tenant_slug, self._tenant_slug)
+        collected: list[tuple[str, dict]] = []
 
-        for data in raw_entries:
+        for slug in slugs:
+            try:
+                r = requests.get(
+                    f"{self._acp_base_url}/{slug}/admin/audit",
+                    params={"since": since_iso, "limit": 500},
+                    headers=self._admin_headers(slug),
+                    timeout=15,
+                )
+            except requests.RequestException as e:
+                self._errors.append(f"audit GET failed ({slug}): {e!r}")
+                continue
+            if not r.ok:
+                self._errors.append(
+                    f"audit GET {slug} {r.status_code}: {r.text[:200]}")
+                continue
+            try:
+                payload = r.json() or {}
+            except ValueError:
+                self._errors.append(f"audit GET {slug}: non-JSON response")
+                continue
+            for _d in (payload.get("entries", []) or []):
+                collected.append((slug, _d))
+
+        for _slug, data in collected:
+            scenario_tenant = REVERSE_TENANT_SLUG_MAP.get(_slug, _slug)
             # Prefer the name the agent actually invoked. ACP's `tool` is
             # the classified name it matched policy on, which since the
             # harness aliases (#676) can differ from the call — `read_file`
@@ -740,13 +810,19 @@ class Runner(AcpRunner):
         # tenant or just get counted as documented declinations in the
         # scorecard. Skipping them breaks positive assertions that
         # require outcomes.
-        self._skip_scenario = scenario.id == "cross_tenant_isolation.02_audit_log_separation"
+        # Only skipped while single-tenant, where both scenario tenants
+        # collapse onto one real one and every entry reads as a leak. With
+        # a second key the scenario is genuinely measurable, so run it.
+        self._skip_scenario = (
+            not self._multi
+            and scenario.id == "cross_tenant_isolation.02_audit_log_separation"
+        )
 
         self._reset_stale_policies()
 
         all_policies = self._scenario_policy_to_acp(scenario)
-        for _tid, policy in all_policies.items():
-            self._write_policy(self._tenant_slug, policy)
+        for _slug, policy in all_policies.items():
+            self._write_policy(_slug, policy)
 
         time.sleep(0.3)  # let writes settle
 
@@ -769,10 +845,16 @@ class Runner(AcpRunner):
             # Workspace doc needs no delete — the coming set() replaces it
             # wholesale. User docs must go: a leftover per-user deny turns
             # a clean allow into a mystery deny.
-            for uid in ("agb-alice", "agb-bob", "agb-carol", "agb-dan", "agb-eve"):
+            # Every tenant in play, not just the primary — a stale per-user
+            # deny left in tenant B turns a clean allow into a mystery deny
+            # exactly as it would in tenant A.
+            for _tid in (self._tenant_ids_by_slug.values()
+                         if getattr(self, "_tenant_ids_by_slug", None)
+                         else [self._tenant_id]):
+              for uid in ("agb-alice", "agb-bob", "agb-carol", "agb-dan", "agb-eve"):
                 try:
                     self._db.document(
-                        f"tenants/{self._tenant_id}/userPolicies/{uid}").delete()
+                        f"tenants/{_tid}/userPolicies/{uid}").delete()
                 except Exception:
                     pass
             return
