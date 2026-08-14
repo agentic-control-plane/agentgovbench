@@ -157,6 +157,29 @@ class Runner(AcpRunner):
         both still completes and still prints a scorecard — that is exactly
         how a meaningless 13/48 gets produced and mistaken for a result.
         """
+        # Refuse to run against a tenant that is not a declared benchmark
+        # tenant. This runner REWRITES workspace governance policy once per
+        # scenario — 48 times per run. Against the dedicated benchmark
+        # tenant that is the point; against a real one it is a destructive
+        # action taken by a program, which is exactly what governance
+        # policy is supposed to be protected from. Pointing ACP_TENANT_SLUG
+        # at a live tenant should be impossible by accident, so it now
+        # requires an explicit, differently-named opt-out.
+        allowed = {"agentgovbench", "agentgovbench-b"}
+        extra = os.environ.get("AGB_ALLOW_TENANT", "").strip()
+        if extra:
+            allowed.add(extra)
+        if self._tenant_slug not in allowed:
+            raise RuntimeError(
+                f"refusing to run against tenant '{self._tenant_slug}'.\n"
+                f"This runner overwrites workspace governance policy on every "
+                f"scenario (48 writes per run). Known benchmark tenants: "
+                f"{sorted(allowed)}.\n"
+                "If you genuinely intend to run against this tenant and it is "
+                "disposable, set AGB_ALLOW_TENANT=<slug>. Do not do this on a "
+                "tenant whose policy you rely on."
+            )
+
         base = f"{self._acp_base_url}/{self._tenant_slug}"
         problems: list[str] = []
         for label, url, need in [
