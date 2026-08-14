@@ -494,22 +494,62 @@ class Runner(AcpRunner):
         """Mid-scenario per-user tier policy change. Writes through the
         userPolicies admin endpoint, preserving whatever's already there
         via explicit merge semantics on the gateway side."""
-        if not pc.user:
-            return
-        real_uid = UID_MAP.get(pc.user, pc.user)
         tier = pc.tier or "interactive"
         entry: dict[str, Any] = {}
         if pc.set_permission:
             entry["permission"] = pc.set_permission
         if pc.set_rate_limit is not None:
             entry["rateLimit"] = pc.set_rate_limit
+
+        # A change with no user is WORKSPACE-scoped — either a tool
+        # override or a tier default. This previously hit `if not pc.user:
+        # return` and vanished, so scenarios that revoke a tool at the
+        # workspace level (cross_tenant_isolation.01) never installed their
+        # deny, and ACP was recorded as allowing a call it was never told
+        # to block.
+        if not pc.user:
+            target_slug = self._slug_for(pc.tenant)
+            if not self._fs_setup:
+                self._errors.append(
+                    "workspace-scoped policy_change needs firestore setup "
+                    "mode (policy writes over the API are human-only)")
+                return
+            from firebase_admin import firestore as fb_firestore
+
+            tid = self._tenant_ids_by_slug.get(target_slug, self._tenant_id)
+            ref = self._db.document(f"tenants/{tid}/policies/governance")
+            doc = ref.get().to_dict() or {}
+            if pc.tool:
+                tools = dict(doc.get("tools", {}))
+                per_tool = dict(tools.get(pc.tool, {}))
+                merged = dict(per_tool.get(tier, {}))
+                merged.update(entry)
+                per_tool[tier] = merged
+                tools[pc.tool] = per_tool
+                doc["tools"] = tools
+            else:
+                defaults = dict(doc.get("defaults", {}))
+                merged = dict(defaults.get(tier, {}))
+                merged.update(entry)
+                defaults[tier] = merged
+                doc["defaults"] = defaults
+            doc["updatedBy"] = "agentgovbench-runner"
+            doc["updatedAt"] = fb_firestore.SERVER_TIMESTAMP
+            ref.set(doc)
+            time.sleep(1.5)  # replica lag before the next governance call
+            return
+
+        real_uid = UID_MAP.get(pc.user, pc.user)
         body = {"defaults": {tier: entry}}
 
         if self._fs_setup:
             from firebase_admin import firestore as fb_firestore
 
+            # Route to the tenant the change names, not always the primary.
+            _tid = self._tenant_ids_by_slug.get(
+                self._slug_for(pc.tenant), self._tenant_id)
             ref = self._db.document(
-                f"tenants/{self._tenant_id}/userPolicies/{real_uid}")
+                f"tenants/{_tid}/userPolicies/{real_uid}")
             doc = ref.get().to_dict() or {}
             defaults = dict(doc.get("defaults", {}))
             merged = dict(defaults.get(tier, {}))
