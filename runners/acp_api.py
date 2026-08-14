@@ -147,6 +147,44 @@ class Runner(AcpRunner):
                 "fixtures and must never touch a real tenant."
             )
 
+    def preflight(self) -> None:
+        """Prove the key can install policy and read audit before scoring.
+
+        Both are prerequisites, not niceties. Without the policy write the
+        scenarios run against whatever policy the tenant already had;
+        without the audit read, identity_propagation, delegation_provenance
+        and audit_completeness cannot be measured at all. A run missing
+        both still completes and still prints a scorecard — that is exactly
+        how a meaningless 13/48 gets produced and mistaken for a result.
+        """
+        base = f"{self._acp_base_url}/{self._tenant_slug}"
+        problems: list[str] = []
+        for label, url, need in [
+            ("audit read", f"{base}/admin/audit?limit=1", "admin.audit.read"),
+            ("policy read", f"{base}/admin/workspacePolicy", "admin policy scope"),
+        ]:
+            try:
+                r = requests.get(url, headers=self._admin_headers(), timeout=20)
+            except Exception as e:
+                problems.append(f"{label}: request failed ({e!r})")
+                continue
+            if r.status_code >= 400:
+                problems.append(
+                    f"{label} -> HTTP {r.status_code} {r.text[:120]} "
+                    f"(needs {need})"
+                )
+        if problems:
+            raise RuntimeError(
+                "ACP_API_KEY cannot drive this deployment:\n  - "
+                + "\n  - ".join(problems)
+                + f"\n\nTenant slug: {self._tenant_slug}. Base: {self._acp_base_url}."
+                "\nMint a gsk_ key on this deployment with bench.impersonate "
+                "and admin.audit.read (or *), then re-export ACP_API_KEY."
+                "\n\nNote: the gateway returns 'Invalid or revoked API key' for "
+                "both a bad key AND a valid key missing a scope, so this "
+                "message cannot tell you which — check the key's scopes first."
+            )
+
     @property
     def metadata(self) -> RunnerMetadata:
         return RunnerMetadata(

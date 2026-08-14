@@ -79,6 +79,27 @@ class BaseRunner(abc.ABC):
 
     # ── Optional hooks — default implementations provided ─────────────
 
+    def preflight(self) -> None:
+        """Verify the runner can actually drive the product before scoring.
+
+        Raise with a diagnostic message if the credential, endpoint, or
+        permissions needed to install policy and read decisions are not
+        available. The harness calls this ONCE before the scenario loop
+        and aborts the whole run if it raises.
+
+        This exists because the alternative is worse than useless: a
+        runner whose setup silently fails still produces a full
+        scorecard, and that scorecard looks like a measurement. A run
+        against un-installed policy with an unreadable audit log scored
+        13/48 — a plausible number, entirely meaningless. Fail loudly at
+        second zero instead of quietly at minute twenty.
+
+        Default is a no-op: runners with no external dependencies (the
+        known-answer subjects, framework-native runners) have nothing to
+        check.
+        """
+        return None
+
     def collect_outcome(self) -> RunOutcome:
         """Assemble the RunOutcome from accumulated tool outcomes + audit.
         Default assembles from ``_tool_outcomes`` list the runner appends

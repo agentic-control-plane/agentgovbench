@@ -138,6 +138,18 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
 
     from .types import Wait
 
+    try:
+        runner_inst.preflight()
+    except Exception as e:
+        click.echo(
+            f"PREFLIGHT FAILED for runner '{runner_inst.metadata.name}': {e}\n"
+            "\nRefusing to run. A scorecard produced when the runner cannot "
+            "install policy or read decisions is not a measurement of the "
+            "product — it looks like one, which is worse.",
+            err=True,
+        )
+        sys.exit(2)
+
     results: list[ScenarioResult] = []
     for i, scn in enumerate(scenarios, 1):
         t0 = time.time()
