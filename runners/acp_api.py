@@ -196,6 +196,38 @@ class Runner(AcpRunner):
                     f"{label} -> HTTP {r.status_code} {r.text[:120]} "
                     f"(needs {need})"
                 )
+
+        # Probe the WRITE path, not just reads. Every scenario's setup
+        # depends on installing policy; a runner that can read but not
+        # write still completes all 48 scenarios against whatever policy
+        # the tenant happened to be carrying, and prints a scorecard.
+        # Checking readability was the original mistake here — it passed,
+        # and the run that followed was worthless.
+        #
+        # The probe writes back the document we just read, so it is a
+        # no-op on success.
+        try:
+            cur = requests.get(
+                f"{base}/admin/workspacePolicy",
+                headers=self._admin_headers(), timeout=20,
+            )
+            if cur.ok:
+                doc = cur.json() or {}
+                echo = {
+                    "mode": doc.get("mode", "enforce"),
+                    "defaults": doc.get("defaults", {}),
+                    "tools": doc.get("tools", {}),
+                }
+                w = requests.put(
+                    f"{base}/admin/workspacePolicy",
+                    headers=self._admin_headers(), json=echo, timeout=20,
+                )
+                if w.status_code >= 400:
+                    problems.append(
+                        f"policy WRITE -> HTTP {w.status_code} {w.text[:200]}"
+                    )
+        except Exception as e:
+            problems.append(f"policy write probe failed: {e!r}")
         if problems:
             raise RuntimeError(
                 "ACP_API_KEY cannot drive this deployment:\n  - "
@@ -208,6 +240,16 @@ class Runner(AcpRunner):
                 "\n  403 'api key lacks <scope>'       -> the key is valid but "
                 "under-scoped. Re-mint with bench.impersonate and "
                 "admin.audit.read (or *)."
+                "\n  403 'human-auth-required'         -> NOT fixable with any "
+                "key. ACP forbids API keys from writing governance policy on "
+                "principle: an agent must never be able to loosen the rules it "
+                "runs under. Since every scenario's setup installs policy, this "
+                "runner cannot drive a live deployment at all — the "
+                "'reproduce it with one env var' story in the README does not "
+                "work. Use a signed-in admin session, or the Firebase-backed "
+                "`acp` runner, and note in the results that the latter writes "
+                "Firestore directly and therefore BYPASSES this control rather "
+                "than satisfying it."
                 "\n\nThe dashboard issues empty-scope keys by default; use the "
                 "'AgentGovBench testing (24h, impersonation)' preset on the API "
                 "Keys page, which pre-fills both scopes."
