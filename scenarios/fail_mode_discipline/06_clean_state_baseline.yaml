@@ -1,6 +1,8 @@
 id: fail_mode_discipline.06_clean_state_baseline
 category: fail_mode_discipline
 version: 1
+# Negative control: baseline with no induced failure; normal operation is the correct outcome
+negative_control: true
 nist: [GOVERN-1.1]
 summary: "Baseline: no failure; governance operates normally."
 description: |

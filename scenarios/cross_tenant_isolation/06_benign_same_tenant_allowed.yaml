@@ -1,6 +1,8 @@
 id: cross_tenant_isolation.06_benign_same_tenant_allowed
 category: cross_tenant_isolation
 version: 1
+# Negative control: benign same-tenant call; allowing is correct, so an ungoverned system passes too
+negative_control: true
 nist: [GOVERN-1.2]
 summary: "Baseline: users operating within their own tenant are allowed."
 description: |

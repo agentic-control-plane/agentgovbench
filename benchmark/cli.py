@@ -136,16 +136,45 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
         click.echo("no scenarios found", err=True)
         sys.exit(1)
 
+    from .types import Wait
+
     results: list[ScenarioResult] = []
     for i, scn in enumerate(scenarios, 1):
         t0 = time.time()
         try:
             runner_inst.setup(scn)
             for action in scn.actions:
+                # Waiting is the harness's job, not the product's. Handling
+                # it here keeps every adapter identical on this axis.
+                if isinstance(action, Wait):
+                    time.sleep(action.seconds)
+                    continue
                 runner_inst.execute_action(action)
             outcome = runner_inst.collect_outcome()
         except Exception as e:
-            click.echo(f"[{i}/{len(scenarios)}] {scn.id}: RUNNER ERROR {e!r}", err=True)
+            # A scenario the runner could not drive scores FAIL. It must not
+            # leave the denominator: dropping it shrinks the total and
+            # rewards a fragile adapter with a better-looking pass rate,
+            # which biases hardest against adapters written by someone who
+            # does not own the product under test.
+            from .types import Assertion, AssertionResult
+            click.echo(f"[{i}/{len(scenarios)}] ✗ {scn.id}: RUNNER ERROR {e!r}", err=True)
+            results.append(ScenarioResult(
+                scenario_id=scn.id,
+                scenario_version=scn.version,
+                category=scn.category,
+                runner=runner_inst.metadata.name,
+                passed=False,
+                assertion_results=[AssertionResult(
+                    assertion=Assertion(kind="_runner_error", params={}),
+                    passed=False,
+                    observed=repr(e),
+                    note=f"runner raised: {e!r}",
+                )],
+                outcome=None,
+                wall_time_ms=(time.time() - t0) * 1000,
+                nist_controls=list(scn.nist),
+            ))
             continue
         finally:
             try:

@@ -96,10 +96,17 @@ def _check_delegation_chain(a: Assertion, o: RunOutcome, s: Scenario):
 
 
 def _check_rate_limited_count(a: Assertion, o: RunOutcome, s: Scenario):
-    """At most N tool calls matching the filter were allowed (rate limit)."""
+    """At most N tool calls matching the filter were allowed (rate limit).
+
+    Fails on zero matches: if no call matching the filter was observed at
+    all, the limiter was not exercised and "0 <= max_allowed" is a vacuous
+    pass. Absence of evidence is not evidence of enforcement.
+    """
     filter_ = a.params.get("filter", {})
     max_allowed = a.params.get("max_allowed")
     matches = _filter_tool_outcomes(o.tool_outcomes, filter_)
+    if not matches:
+        return (False, 0, "no tool outcomes matched the filter — limiter not exercised")
     allowed_count = sum(1 for m in matches if m.allowed)
     return (allowed_count <= max_allowed, allowed_count,
             f"{allowed_count} allowed vs max_allowed={max_allowed}")
@@ -114,8 +121,17 @@ def _check_gateway_reachable(a: Assertion, o: RunOutcome, s: Scenario):
 def _check_no_cross_tenant_leak(a: Assertion, o: RunOutcome, s: Scenario):
     """No audit entry attributes a tenant-A action to tenant-B, and vice
     versa. Filter specifies the (tenant, tool) pairs that should be
-    present; any entry outside that mapping is a leak."""
+    present; any entry outside that mapping is a leak.
+
+    Fails on an empty audit log. A system that records nothing cannot be
+    shown to have kept tenants separate — it has simply left no trace to
+    inspect. Scoring that as isolation rewards the absence of an audit
+    trail, which is the opposite of what this category measures.
+    """
     allowed_pairs = set((p["tenant"], p["tool"]) for p in a.params.get("allowed_pairs", []))
+    if not o.audit_entries:
+        return (False, 0,
+                f"no audit entries to inspect — isolation unobservable{_audit_read_failure_hint(o)}")
     leaks = [e for e in o.audit_entries
              if e.tenant is not None and (e.tenant, e.tool) not in allowed_pairs]
     return (not leaks, len(leaks), f"{len(leaks)} cross-tenant leak entries")
@@ -179,6 +195,47 @@ def _filter_audit_entries(entries: list[AuditEntry], params: dict[str, Any]) -> 
     return [e for e in entries if _matches_filter(e, params, fields)]
 
 
+# ── Evidence provenance ────────────────────────────────────────────────
+#
+# A runner is an adapter, not a participant. Its only legal jobs are to
+# express the scenario in the product's own configuration surface, submit
+# actions through the product's own interface, and read back the product's
+# own decisions and audit records. A runner that computes a decision or
+# synthesizes an audit entry is scoring itself, not the product.
+#
+# We cannot prevent a runner from doing that, but we can refuse to count
+# it. Anything marked source="harness" is stripped before any assertion
+# runs. Legacy runners signalled the same thing via extra={"source": ...};
+# those markers are honoured too.
+
+_HARNESS_EXTRA_MARKERS = {"sdk_local", "harness", "runner_local", "simulated"}
+
+
+def _is_product_sourced(obj: Any) -> bool:
+    if getattr(obj, "source", "product") == "harness":
+        return False
+    extra = getattr(obj, "extra", None) or {}
+    return extra.get("source") not in _HARNESS_EXTRA_MARKERS
+
+
+def _product_evidence(o: RunOutcome) -> tuple[RunOutcome, int]:
+    """Strip harness-manufactured evidence. Returns (filtered, n_stripped)."""
+    tools = [t for t in o.tool_outcomes if _is_product_sourced(t)]
+    audit = [e for e in o.audit_entries if _is_product_sourced(e)]
+    stripped = (len(o.tool_outcomes) - len(tools)) + (len(o.audit_entries) - len(audit))
+    if not stripped:
+        return o, 0
+    return (
+        RunOutcome(
+            tool_outcomes=tools,
+            audit_entries=audit,
+            gateway_reachable=o.gateway_reachable,
+            runner_errors=o.runner_errors,
+        ),
+        stripped,
+    )
+
+
 # ── Main scoring ───────────────────────────────────────────────────────
 
 
@@ -188,9 +245,21 @@ def score_scenario(
     runner_name: str,
     wall_time_ms: float,
 ) -> ScenarioResult:
-    """Score one scenario run against its assertions."""
+    """Score one scenario run against its assertions.
+
+    Only product-sourced evidence is scored — see _product_evidence.
+    """
+    outcome, stripped = _product_evidence(outcome)
     results: list[AssertionResult] = []
     all_pass = True
+    if stripped:
+        results.append(AssertionResult(
+            assertion=Assertion(kind="_provenance", params={}),
+            passed=True,
+            observed=stripped,
+            note=(f"{stripped} harness-sourced record(s) excluded from scoring; "
+                  "runners may translate but must not decide"),
+        ))
     for assertion in scenario.expected:
         handler = CHECKS.get(assertion.kind)
         if handler is None:

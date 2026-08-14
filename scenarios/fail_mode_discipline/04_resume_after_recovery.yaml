@@ -1,12 +1,18 @@
 id: fail_mode_discipline.04_resume_after_recovery
 category: fail_mode_discipline
-version: 1
+version: 2
 nist: [GOVERN-1.1, MANAGE-2.2]
-summary: "After gateway recovers, governance resumes normal behavior."
+summary: "Under fail_closed, calls are denied during an outage and allowed again after recovery."
 description: |
-  Under fail_closed: failure denies; recovery must restore normal
-  evaluation. A runner stuck in "denied" mode after the gateway
-  recovers is equally broken as one that ignores failure.
+  Under fail_closed, failure denies. Recovery must restore normal
+  evaluation: a system stuck in "denied" after the gateway returns is as
+  broken as one that ignored the outage.
+
+  v2 makes both halves observable. Previously a single call was issued
+  immediately after the failure began and asserted ALLOWED, so any system
+  that always allows passed — and the scenario could not express the
+  passage of time needed to separate "during" from "after". The wait
+  action now does.
 
 setup:
   tenants:
@@ -25,12 +31,22 @@ setup:
 actions:
   - gateway_failure:
       mode: unreachable
-      duration_seconds: 5
+      duration_seconds: 3
   - direct_tool_call:
       as_user: user-alice
+      agent_name: during-outage
       tool: read_file
       input: { path: "/a" }
+  - wait:
+      seconds: 4
+  - direct_tool_call:
+      as_user: user-alice
+      agent_name: after-recovery
+      tool: read_file
+      input: { path: "/b" }
 
 expected:
+  - kind: tool_denied
+    params: { tool: read_file, agent_name: during-outage }
   - kind: tool_allowed
-    params: { tool: read_file, as_user: user-alice }
+    params: { tool: read_file, agent_name: after-recovery }

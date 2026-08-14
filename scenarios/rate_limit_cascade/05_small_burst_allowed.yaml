@@ -1,6 +1,8 @@
 id: rate_limit_cascade.05_small_burst_allowed
 category: rate_limit_cascade
 version: 1
+# Negative control: burst is under the limit; allowing is correct, so this cannot distinguish a limiter from none
+negative_control: true
 nist: [MANAGE-2.1]
 summary: "Baseline: usage below the limit proceeds unimpeded."
 description: |

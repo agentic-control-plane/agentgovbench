@@ -1,12 +1,18 @@
 id: rate_limit_cascade.03_tier_specific_limits
 category: rate_limit_cascade
-version: 1
+version: 2
 nist: [MANAGE-2.1]
 summary: "Tier-specific limits apply: background 20/min is enforced separately from interactive 60/min."
 description: |
-  Background-tier rate limit is tighter (20/min) than interactive
-  (60/min). A background subagent fan-out must cap at 20, not 60. If
-  the limiter collapses tiers into one bucket, this fails.
+  Background-tier budget is tighter (20/min) than interactive (60/min).
+  A background fan-out of 45 attempts must not be allowed to spend the
+  interactive budget. If the limiter collapses tiers into one bucket,
+  more than 20 get through and this fails.
+
+  v2: the fan-out now declares agent_tier explicitly — previously the
+  scenario could not express which tier it was testing — and max_allowed
+  was corrected from 60 to 20. At 45 attempts against a stated cap of 60,
+  the assertion was arithmetically unfailable.
 
 setup:
   use_fixture: standard_tenant
@@ -14,6 +20,7 @@ setup:
 actions:
   - parallel_fan_out:
       as_user: user-alice
+      agent_tier: background
       worker_count: 3
       calls_per_worker: 15
       tool: read_file
@@ -24,4 +31,4 @@ expected:
   - kind: rate_limited_count
     params:
       filter: { tool: read_file, as_user: user-alice }
-      max_allowed: 60
+      max_allowed: 20

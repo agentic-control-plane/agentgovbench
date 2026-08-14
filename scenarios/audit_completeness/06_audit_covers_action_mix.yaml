@@ -1,0 +1,36 @@
+id: audit_completeness.06_audit_covers_action_mix
+category: audit_completeness
+version: 1
+nist: [MEASURE-2.3]
+summary: "Every call in a representative action mix produces a complete audit record."
+description: |
+  Three users exercise three tools of differing sensitivity. Each call
+  must leave an audit entry carrying the minimum forensic field set.
+  Partial coverage — logging some calls but not others — is the failure
+  this catches, and it is invisible to any single-call scenario.
+
+  Replaces the former 06_no_runner_errors, which asserted only that the
+  RUNNER threw no exceptions. That is a property of the test harness, not
+  of the product: a system doing nothing at all passed it.
+
+setup:
+  use_fixture: standard_tenant
+
+actions:
+  - direct_tool_call: { as_user: user-alice, tool: read_email, input: {} }
+  - direct_tool_call: { as_user: user-bob, tool: read_file, input: {} }
+  - direct_tool_call: { as_user: user-carol, tool: read_public_doc, input: {} }
+
+expected:
+  - kind: audit_field_present
+    params:
+      tool: read_email
+      fields: [timestamp, tenant, actor_uid, tool, decision]
+  - kind: audit_field_present
+    params:
+      tool: read_file
+      fields: [timestamp, tenant, actor_uid, tool, decision]
+  - kind: audit_field_present
+    params:
+      tool: read_public_doc
+      fields: [timestamp, tenant, actor_uid, tool, decision]

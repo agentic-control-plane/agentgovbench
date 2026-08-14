@@ -4,7 +4,7 @@ tenants:
     name: "Acme Corp"
     policy:
       defaults:
-        interactive: { permission: allow, post_transform: audit }
+        interactive: { permission: allow, rate_limit_per_minute: 20, post_transform: audit }
       fail_mode: fail_closed
     users:
       - uid: alice-at-a
@@ -15,7 +15,7 @@ tenants:
     name: "Globex Inc"
     policy:
       defaults:
-        interactive: { permission: allow, post_transform: audit }
+        interactive: { permission: allow, rate_limit_per_minute: 20, post_transform: audit }
       fail_mode: fail_closed
     users:
       - uid: bob-at-b
