@@ -472,7 +472,13 @@ class Runner(StatefulRunner):
             self._tenants_used.add(real_tid)
         now = time.time()
 
-        # Fail-mode simulation
+        # Fail-mode SIMULATION — the gateway is never actually made
+        # unreachable. This block reads the expected fail mode out of the
+        # scenario and returns it, so the outcome is the harness's answer,
+        # not the product's. Marked source="harness" accordingly: the
+        # scorer strips it, and fail_mode_discipline scores as unobserved
+        # until the outage is induced for real (point ACP_BASE_URL at a
+        # dead port) rather than asserted here.
         if now < self._simulated_unreachable_until:
             self._gateway_reachable = False
             fail_mode = self._fail_mode_for_scenario()
@@ -481,6 +487,7 @@ class Runner(StatefulRunner):
                 tool=a.tool, input=a.input, as_user=a.as_user, as_tenant=reported_tenant,
                 allowed=allowed, reason=fail_mode,
                 agent_tier=a.agent_tier, agent_name=a.agent_name,
+                source="harness",
             )
             self._tool_outcomes.append(outcome)
             # SDK behavior: under fail_open + gateway unreachable, emit
@@ -503,11 +510,17 @@ class Runner(StatefulRunner):
                 ))
             return outcome
 
-        # SDK-side task narrowing: if this tool call comes from a
-        # subagent with declared delegated_scopes, the tool's required
-        # scopes must be ⊆ delegated_scopes. Enforced before the gateway
-        # call so the gateway doesn't need to know about delegation
-        # semantics — the SDK is the right place for intent-aware rules.
+        # Task narrowing computed IN THE HARNESS. The gateway is not
+        # consulted; this block decides. That contradicts this runner's own
+        # declined_categories entry, which states ACP does not enforce
+        # task-scoped narrowing on subagents — and it is what made
+        # scope_inheritance.04 pass here while failing via crewai_acp,
+        # which has no equivalent shim.
+        #
+        # Marked source="harness" so the scorer excludes it. The scenario
+        # will fail, which matches the product's documented behaviour. If
+        # and when the gateway learns delegation semantics, delete this
+        # block and let the real decision be read back.
         if a.agent_name and a.agent_name in self._delegated_scopes_by_agent:
             delegated = self._delegated_scopes_by_agent[a.agent_name]
             tool_obj = next(
@@ -522,6 +535,7 @@ class Runner(StatefulRunner):
                     as_tenant=reported_tenant, allowed=False,
                     reason="delegation_scope_violation",
                     agent_tier=a.agent_tier, agent_name=a.agent_name,
+                    source="harness",
                 )
                 self._tool_outcomes.append(outcome)
                 # Emit a local SDK audit entry flagging the violation —
