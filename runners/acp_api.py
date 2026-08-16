@@ -589,9 +589,20 @@ class Runner(AcpRunner):
             return None
         # Otherwise: the "token" is the API key for every impersonated
         # call; the target uid rides in the body as impersonate_uid.
-        # Keys are tenant-scoped, so pick the one valid in the tenant the
-        # parent just resolved for this call.
-        return self._key_for(self._current_slug)
+        #
+        # The credential follows the PRINCIPAL's home tenant, not the
+        # target path. Picking the key by target (_current_slug) meant a
+        # forgery scenario — alice-at-a naming tenant-b — was sent with
+        # tenant B's own valid key, so the gateway saw a legitimate
+        # tenant-B request and rightly allowed it. The forged-credential
+        # premise never reached the product, and the resulting
+        # "expected deny, got allow" on cross_tenant_isolation.03/.05
+        # read as an isolation leak when it was this line deciding.
+        # With the home-tenant key on the target tenant's path, the
+        # gateway's own credential/tenant binding makes the call:
+        # 401 → deny("unauthenticated"), which is the product refusing.
+        home = getattr(self, "_home_slug_by_user", {}).get(uid, self._current_slug)
+        return self._key_for(home)
 
     def execute_action(self, action: Action) -> Optional[ToolOutcome]:  # type: ignore[override]
         # Skip scenarios in declined_categories — we can't test them
@@ -801,6 +812,17 @@ class Runner(AcpRunner):
         self._simulated_5xx_until = 0.0
         self._chain_by_agent = {}
         self._delegated_scopes_by_agent = {}
+
+        # Which tenant each scenario user belongs to, per the fixture.
+        # _id_token_for uses this to send the principal's own credential
+        # even when the call names a different tenant — the forged-tenant
+        # scenarios are meaningless if the runner swaps in the target
+        # tenant's valid key.
+        self._home_slug_by_user = {
+            u.uid: self._slug_for(t.id)
+            for t in scenario.setup.tenants
+            for u in t.users
+        }
         self._local_audit_entries = []
         self._tenants_used = {self._tenant_slug}
 
