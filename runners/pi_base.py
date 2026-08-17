@@ -187,14 +187,30 @@ class PiRunner(StatefulRunner):
             self._dispatch()
         return super().collect_outcome()
 
+    #: Env var a subject uses to declare the tier for a process, if any.
+    #: When set, calls are grouped by tier and one executor process runs per
+    #: group — pi has no per-call tier, so a mixed-tier scenario cannot be
+    #: expressed in a single session.
+    tier_env_var: Optional[str] = None
+
     def _dispatch(self) -> None:
+        if not self.tier_env_var:
+            self._dispatch_group(self._calls, {})
+            return
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for c in self._calls:
+            groups.setdefault(c.get("tier") or "interactive", []).append(c)
+        for tier, calls in groups.items():
+            self._dispatch_group(calls, {self.tier_env_var: tier})
+
+    def _dispatch_group(self, calls: list[dict[str, Any]], extra_env: dict[str, str]) -> None:
         spec = {
             "extensions": list(self.extensions),
             "calls": [
                 {"id": c["id"], "tool": c["tool"], "args": c["args"]}
-                for c in self._calls
+                for c in calls
             ],
-            "env": dict(self.driver_env),
+            "env": {**self.driver_env, **extra_env},
         }
         try:
             proc = subprocess.run(
@@ -218,7 +234,7 @@ class PiRunner(StatefulRunner):
         for err in result.get("errors", []):
             self._errors.append(f"pi: {err}")
 
-        by_id = {c["id"]: c for c in self._calls}
+        by_id = {c["id"]: c for c in calls}
         for o in result.get("outcomes", []):
             src = by_id.get(o["id"], {})
             self._tool_outcomes.append(ToolOutcome(

@@ -881,6 +881,17 @@ class Runner(AcpRunner):
             and scenario.id == "cross_tenant_isolation.02_audit_log_separation"
         )
 
+        self.setup_policy_only(scenario)
+
+    def setup_policy_only(self, scenario) -> None:
+        """Install this scenario's policy fixtures and nothing else.
+
+        Split out so other subjects can reuse the tested translation and
+        write path instead of carrying a second copy. runners/pi_acp.py
+        composes this runner purely for fixtures while driving the calls
+        through a real pi session.
+        """
+        self._scenario = scenario
         self._reset_stale_policies()
 
         all_policies = self._scenario_policy_to_acp(scenario)
