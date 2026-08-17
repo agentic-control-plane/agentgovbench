@@ -782,6 +782,7 @@ class Runner(AcpRunner):
                 decision=decision,
                 reason=data.get("decisionReason"),
                 trace_id=data.get("requestId") or data.get("sessionId"),
+                agent_tier=data.get("agentTier"),
                 delegation_chain=chain,
                 extra={
                     "tier": data.get("agentTier"),

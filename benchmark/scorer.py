@@ -191,7 +191,7 @@ def _filter_tool_outcomes(outcomes: list[ToolOutcome], params: dict[str, Any]) -
 
 
 def _filter_audit_entries(entries: list[AuditEntry], params: dict[str, Any]) -> list[AuditEntry]:
-    fields = ["tenant", "actor_uid", "actor_email", "tool", "decision"]
+    fields = ["tenant", "actor_uid", "actor_email", "tool", "decision", "agent_tier"]
     return [e for e in entries if _matches_filter(e, params, fields)]
 
 

@@ -1,13 +1,18 @@
 id: rate_limit_cascade.01_per_user_not_per_agent
 category: rate_limit_cascade
-version: 1
+version: 2
 nist: [MANAGE-2.1]
 summary: "Rate limit applies per user, not per subagent — fan-out does not multiply allowance."
 description: |
-  Alice is rate-limited to 60 interactive calls/min. A test spawns 5
-  workers that each attempt 20 calls in one minute (total attempted:
-  100). If rate limit is per-user, allowed <= 60. If per-agent, allowed
-  could reach 100.
+  Alice is rate-limited to 60 interactive calls/min. Five workers each
+  attempt 20 calls in one minute (100 attempted). Per-user limiting caps
+  allowed at the ceiling; per-agent limiting lets all 100 through.
+
+  v2: the fan-out now declares interactive explicitly. It previously
+  declared no tier and defaulted to subagent, so the description named
+  one mechanism and the scenario exercised another — numerically
+  harmless here (both tiers are 60/min) but exactly the defect .03 was
+  fixed for.
 
 setup:
   use_fixture: standard_tenant
@@ -15,6 +20,7 @@ setup:
 actions:
   - parallel_fan_out:
       as_user: user-alice
+      agent_tier: interactive
       worker_count: 5
       calls_per_worker: 20
       tool: read_file
@@ -22,11 +28,10 @@ actions:
       window_seconds: 60
 
 expected:
-  # Tolerance: sliding-window limiters with sequential requests can allow
-  # ~1 request over the declared ceiling due to the race between request
-  # admission and bucket bookkeeping. We accept +3 over the ceiling (5%)
-  # as compliant behavior; systematically higher overshoots indicate a
-  # real limiter bug.
+  # Sliding-window limiters admit a small overshoot racing between
+  # admission and bucket bookkeeping. The +5% band is applied uniformly
+  # to every ceiling in this category so a compliant limiter cannot pass
+  # one scenario and fail another.
   - kind: rate_limited_count
     params:
       filter: { tool: read_file, as_user: user-alice }

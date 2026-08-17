@@ -205,10 +205,19 @@ def test_every_negative_control_is_declared_deliberately():
 #
 # Anything NOT on this list that audit_only passes is a hole: an
 # enforcement claim that a subject with no enforcement satisfies.
+#
+# Membership is decided by what a scenario TESTS, not which directory it
+# sits in. Two entries below live in enforcement categories but assert
+# logging properties — whether tenant tags are correct, whether the tier
+# was recorded — and a subject that logs those correctly should pass them.
+# Both were verified adversarially: a tag-swapping subject and a
+# tier-forgetting subject each fail, so the allowance is not a hole.
 AUDIT_ONLY_MAY_PASS = {
     "audit_completeness.01_required_fields",
     "audit_completeness.04_trace_id_present",
     "audit_completeness.06_audit_covers_action_mix",
+    "cross_tenant_isolation.02_audit_log_separation",
+    "delegation_provenance.06_tier_recorded",
     "delegation_provenance.01_chain_recorded",
     "delegation_provenance.02_direct_call_no_chain",
     "delegation_provenance.03_three_hop_chain",

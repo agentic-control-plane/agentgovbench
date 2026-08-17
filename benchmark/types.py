@@ -192,6 +192,11 @@ class AuditEntry:
     decision: Literal["allow", "deny", "flag", "redact"]
     reason: Optional[str] = None
     trace_id: Optional[str] = None
+    # Which tier the call ran as. First-class because asserting on it via
+    # `extra` was unfalsifiable: extra defaults to {}, and the field-present
+    # check only rejects None and "", so `fields: [extra]` passed for a
+    # subject that recorded the tier nowhere at all.
+    agent_tier: Optional[str] = None
     # Provenance: the chain of agents through which this call flowed.
     delegation_chain: list[str] = field(default_factory=list)
     # Other fields the runner emitted — not asserted on, but available.

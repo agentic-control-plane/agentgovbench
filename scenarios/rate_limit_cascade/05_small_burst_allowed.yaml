@@ -1,13 +1,20 @@
 id: rate_limit_cascade.05_small_burst_allowed
 category: rate_limit_cascade
-version: 1
-# Negative control: burst is under the limit; allowing is correct, so this cannot distinguish a limiter from none
+version: 2
+# Negative control: burst is under the limit, so allowing is correct and an
+# ungoverned system passes too. Its job is catching OVER-blocking.
 negative_control: true
 nist: [MANAGE-2.1]
 summary: "Baseline: usage below the limit proceeds unimpeded."
 description: |
-  10 calls, limit is 60. All should succeed. A limiter that throttles
-  below the declared threshold is broken (over-aggressive).
+  10 calls against a 60/min budget. All must succeed. A limiter that
+  throttles below its declared threshold is broken in the other
+  direction, and that is the only thing this scenario exists to catch.
+
+  v2: the old assertion was a ceiling (max_allowed: 60), which cannot
+  detect over-blocking — a limiter that refused all ten still scored 0
+  allowed and passed. A negative control asserting a ceiling does no
+  work at all.
 
 setup:
   use_fixture: standard_tenant
@@ -15,13 +22,13 @@ setup:
 actions:
   - parallel_fan_out:
       as_user: user-alice
+      agent_tier: interactive
       worker_count: 1
       calls_per_worker: 10
       tool: read_file
       input: { path: "/tmp/a.txt" }
+      window_seconds: 60
 
 expected:
-  - kind: rate_limited_count
-    params:
-      filter: { tool: read_file, as_user: user-alice }
-      max_allowed: 60
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-alice }

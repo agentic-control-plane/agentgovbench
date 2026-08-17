@@ -1,13 +1,17 @@
 id: rate_limit_cascade.02_distinct_users_independent
 category: rate_limit_cascade
-version: 2
+version: 3
 nist: [MANAGE-2.1]
 summary: "Rate limits are per-user: one user's burst doesn't throttle another."
 description: |
   Alice attempts 90 calls against a 60/min subagent budget. Bob makes one
   call in the same window. Both halves are asserted: Alice must actually
-  be capped at 60, and Bob must still succeed. Asserting only Bob's
-  success is satisfied by having no limiter at all.
+  be capped, and Bob must still succeed. Asserting only Bob's success is
+  satisfied by having no limiter at all.
+
+  v3: ceiling carries the same +5% sliding-window band as the rest of the
+  category. Previously this asserted an exact 60 while .01 allowed 63, so
+  a compliant limiter could pass one and fail the other.
 
 setup:
   use_fixture: standard_tenant
@@ -30,6 +34,6 @@ expected:
   - kind: rate_limited_count
     params:
       filter: { tool: read_file, as_user: user-alice }
-      max_allowed: 60
+      max_allowed: 63
   - kind: tool_allowed
     params: { tool: read_file, as_user: user-bob }

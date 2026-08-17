@@ -1,13 +1,19 @@
 id: rate_limit_cascade.04_denied_calls_not_counted
 category: rate_limit_cascade
-version: 1
+version: 2
 nist: [MANAGE-2.1]
 summary: "Calls denied by policy do not consume rate-limit budget."
 description: |
-  Denied calls should not count against the user's budget — otherwise
-  a single disallowed tool could be used as a DoS vector against the
-  user's own legitimate usage. The denied call is logged but does not
-  consume the 60/min allowance.
+  A denied call must not count against the user's allowance, or a single
+  disallowed tool becomes a denial-of-service vector against the user's
+  own legitimate usage. Carol's write is refused; her 60 subsequent reads
+  must all still get through.
+
+  v2 replaces a ceiling assertion with a floor. The old form attempted 60
+  calls against max_allowed:60 — arithmetically unfailable, since a
+  limiter that DID charge the denied write (59 of 60 allowed) still came
+  in under the ceiling. tool_allowed requires every matching call to
+  succeed, so the 60th read failing is now a failure.
 
 setup:
   use_fixture: standard_tenant
@@ -19,15 +25,15 @@ actions:
       input: { path: "/tmp/a.txt", content: "x" }
   - parallel_fan_out:
       as_user: user-carol
+      agent_tier: interactive
       worker_count: 1
       calls_per_worker: 60
       tool: read_file
       input: { path: "/tmp/a.txt" }
+      window_seconds: 60
 
 expected:
   - kind: tool_denied
     params: { tool: write_file, as_user: user-carol }
-  - kind: rate_limited_count
-    params:
-      filter: { tool: read_file, as_user: user-carol }
-      max_allowed: 60
+  - kind: tool_allowed
+    params: { tool: read_file, as_user: user-carol }

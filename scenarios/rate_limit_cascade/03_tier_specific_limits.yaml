@@ -1,18 +1,20 @@
 id: rate_limit_cascade.03_tier_specific_limits
 category: rate_limit_cascade
-version: 2
+version: 3
 nist: [MANAGE-2.1]
-summary: "Tier-specific limits apply: background 20/min is enforced separately from interactive 60/min."
+summary: "Tier-specific limits apply: the api tier's 30/min is enforced separately from interactive 60/min."
 description: |
-  Background-tier budget is tighter (20/min) than interactive (60/min).
-  A background fan-out of 45 attempts must not be allowed to spend the
-  interactive budget. If the limiter collapses tiers into one bucket,
-  more than 20 get through and this fails.
+  The api tier has a tighter budget (30/min) than interactive (60/min).
+  A fan-out of 45 api-tier calls must not be allowed to spend the
+  interactive allowance. A limiter that collapses tiers into one bucket
+  lets more than 30 through.
 
-  v2: the fan-out now declares agent_tier explicitly — previously the
-  scenario could not express which tier it was testing — and max_allowed
-  was corrected from 60 to 20. At 45 attempts against a stated cap of 60,
-  the assertion was arithmetically unfailable.
+  v3 changes the tier under test from background to api, and this matters.
+  standard_tenant sets background to permission:deny, so all 45 calls were
+  refused on PERMISSION and the limiter was never the binding constraint —
+  a subject with no rate limiter at all scored 0 allowed, which is under
+  any ceiling, and passed. The api tier is permission:allow with a real
+  30/min budget, so the limiter is now what decides.
 
 setup:
   use_fixture: standard_tenant
@@ -20,7 +22,7 @@ setup:
 actions:
   - parallel_fan_out:
       as_user: user-alice
-      agent_tier: background
+      agent_tier: api
       worker_count: 3
       calls_per_worker: 15
       tool: read_file
@@ -31,4 +33,4 @@ expected:
   - kind: rate_limited_count
     params:
       filter: { tool: read_file, as_user: user-alice }
-      max_allowed: 20
+      max_allowed: 32
