@@ -221,6 +221,11 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 "declined_categories": runner_inst.metadata.declined_categories,
             },
             "aggregate": agg,
+            # Runner-side failures, deduplicated with counts. Persisted at
+            # the top level so a results file can never present a score
+            # without the evidence that the run was compromised — reading
+            # the JSON must not be a way to miss what the console shouted.
+            "runner_errors": _runner_error_tally(results),
             "results": [_result_to_dict(r, include_outcomes) for r in results],
         }
         if out:
@@ -249,6 +254,64 @@ def _print_scorecard(runner_inst: BaseRunner, agg: dict, results: list[ScenarioR
     click.echo(f"{'total':<36} {agg['total_passed']:>3}/{agg['total_scenarios']:<2}")
     for cat, reason in (meta.declined_categories or {}).items():
         click.echo(f"  ({cat}: N/A — {reason})")
+
+    _print_runner_errors(results)
+
+
+def _runner_error_tally(results: list[ScenarioResult]) -> dict:
+    """{error: count} plus the scenarios affected. Empty dict when clean."""
+    tally: dict[str, int] = {}
+    affected: set[str] = set()
+    for r in results:
+        for err in (r.outcome.runner_errors if r.outcome else []) or []:
+            tally[err] = tally.get(err, 0) + 1
+            affected.add(r.scenario_id)
+    if not tally:
+        return {}
+    return {
+        "total": sum(tally.values()),
+        "scenarios_affected": sorted(affected),
+        "by_error": tally,
+    }
+
+
+def _print_runner_errors(results: list[ScenarioResult]) -> None:
+    """Surface anything the runner swallowed, loudly.
+
+    Runners accumulate failures into an internal list and carry on. That
+    is the right call mid-run — one flaky read shouldn't abort 48
+    scenarios — but it means a run whose SETUP never worked still
+    completes and still prints a scorecard that looks like a measurement.
+
+    This has now happened twice for real: a revoked API key produced a
+    clean-looking 13/48, and a policy-write the gateway refused produced
+    a 16/48. Both were meaningless, both were silent, and both cost a
+    twenty-minute run to discover. Errors are deduplicated because a
+    setup failure repeats once per scenario and the count is the
+    interesting part, not forty-eight copies of the same line.
+    """
+    tally: dict[str, int] = {}
+    affected: set[str] = set()
+    for r in results:
+        for err in (r.outcome.runner_errors if r.outcome else []) or []:
+            tally[err] = tally.get(err, 0) + 1
+            affected.add(r.scenario_id)
+
+    if not tally:
+        return
+
+    click.echo()
+    click.echo("!" * 70)
+    click.echo(f"RUNNER ERRORS — {sum(tally.values())} across {len(affected)} scenario(s)")
+    click.echo("!" * 70)
+    for err, count in sorted(tally.items(), key=lambda kv: -kv[1]):
+        suffix = f"  (x{count})" if count > 1 else ""
+        click.echo(f"  • {err}{suffix}")
+    click.echo()
+    click.echo("These are failures the RUNNER hit, not verdicts the product")
+    click.echo("returned. If they touch setup or audit reads, the scores above")
+    click.echo("describe the runner's problems rather than the product's, and")
+    click.echo("should not be reported as a result.")
 
 
 @cli.command()
