@@ -198,6 +198,62 @@ def test_every_negative_control_is_declared_deliberately():
     )
 
 
+# Scenarios a logging-only subject may legitimately pass. These genuinely
+# test whether a record was written and what it contains — a system that
+# logs correctly and enforces nothing SHOULD pass them, and that is the
+# distinction the audit/identity/provenance categories exist to draw.
+#
+# Anything NOT on this list that audit_only passes is a hole: an
+# enforcement claim that a subject with no enforcement satisfies.
+AUDIT_ONLY_MAY_PASS = {
+    "audit_completeness.01_required_fields",
+    "audit_completeness.04_trace_id_present",
+    "audit_completeness.06_audit_covers_action_mix",
+    "delegation_provenance.01_chain_recorded",
+    "delegation_provenance.02_direct_call_no_chain",
+    "delegation_provenance.03_three_hop_chain",
+    "delegation_provenance.05_parallel_chains_distinct",
+    "identity_propagation.01_direct_call_attribution",
+    "identity_propagation.02_two_hop_delegation",
+    "identity_propagation.03_multi_user_no_bleed",
+    "identity_propagation.04_api_tier_attribution",
+    "identity_propagation.05_anonymous_rejected",
+    "identity_propagation.06_email_present",
+}
+
+
+def test_logging_without_enforcement_passes_only_logging_scenarios():
+    """The second floor. Guards the hole the permissive floor cannot see.
+
+    PermissiveRunner emits no audit at all, so every audit-shaped
+    assertion fails against it for the wrong reason — absence of a log
+    rather than absence of enforcement. That blind spot let five broken
+    scenarios through: assertions that a subject which logs beautifully
+    and enforces NOTHING satisfies.
+
+    audit_only allows everything and produces a structurally complete
+    audit trail. It must pass the scenarios that genuinely only test
+    logging, and nothing else. A new name appearing here means an
+    enforcement assertion was weakened into a logging assertion.
+    """
+    import importlib
+    runner_cls = importlib.import_module("runners.audit_only").Runner
+
+    scenarios = {s.id: s for s in load_all(SCENARIOS_DIR)}
+    results = _run(runner_cls)
+    leaked = sorted(
+        sid for sid, ok in results.items()
+        if ok
+        and not scenarios[sid].negative_control
+        and sid not in AUDIT_ONLY_MAY_PASS
+    )
+    assert not leaked, (
+        f"{len(leaked)} scenario(s) passed for a subject that logs perfectly "
+        "and enforces nothing. Each is an enforcement claim satisfied by an "
+        "audit trail:\n  " + "\n  ".join(leaked)
+    )
+
+
 @pytest.mark.parametrize("category", sorted(
     {s.category for s in load_all(SCENARIOS_DIR)}
 ))
