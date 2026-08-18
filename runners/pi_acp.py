@@ -112,10 +112,62 @@ class Runner(PiRunner):
         try:
             fx = self._fixtures()
             fx.setup_policy_only(scenario)
+            # Mark the read window for audit_log(). Without it the audit
+            # query has no `since` and returns the whole history.
+            import time as _time
+            fx._scenario_start_ts = _time.time()
+            fx._errors = []
         except Exception as e:
             # Loud, never silent. A swallowed setup step is what produced two
             # meaningless full runs earlier this week.
             self._errors.append(f"fixture install failed: {e!r}")
+
+    def audit_log(self):
+        """Read ACP's audit trail for this scenario.
+
+        Without this, every audit-dependent assertion fails for lack of
+        LOOKING rather than lack of logging — audit_completeness,
+        identity_propagation and cross_tenant_isolation all scored 0/6 on
+        the first full run for exactly that reason, and 0/6 reads as a
+        product verdict when it is a runner gap.
+
+        Delegates to the same /admin/audit read the HTTP runner uses, so
+        there is one implementation of the query and its defensive parsing
+        rather than two that can drift.
+        """
+        fx = getattr(self, "_fx", None)
+        if fx is None:
+            return list(self._audit)
+        try:
+            entries = fx.audit_log()
+        except Exception as e:
+            self._errors.append(f"audit read failed: {e!r}")
+            return list(self._audit)
+        # Surface the helper's own errors (401s, read failures) as ours, or
+        # a broken audit read looks like a product that logged nothing.
+        for err in getattr(fx, "_errors", []) or []:
+            self._errors.append(f"audit: {err}")
+
+        # ACP records `sub` as the authenticated PRINCIPAL, which for a key
+        # is `apikey:<keyId>` — not the user it resolves to. The row does
+        # carry the right userEmail, so the gateway knows who acted; the uid
+        # simply is not written. Answering "who did this" therefore needs a
+        # join to a key doc that may since have been revoked.
+        #
+        # Resolve by email, which is what a forensic reader would have to do
+        # anyway. Assertions are about the person, not the credential.
+        by_email = {
+            u.email: u.uid
+            for t_ in (self._scenario.setup.tenants if self._scenario else [])
+            for u in t_.users
+            if u.email
+        }
+        for e in entries:
+            if (e.actor_uid or "").startswith("apikey:") and e.actor_email:
+                resolved = by_email.get(e.actor_email)
+                if resolved:
+                    e.actor_uid = resolved
+        return list(self._audit) + list(entries)
 
     def _env_for_group(self, user: str, tier: str):
         """Each benchmark user acts with its OWN key.
