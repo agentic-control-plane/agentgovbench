@@ -170,11 +170,24 @@ class PiRunner(StatefulRunner):
                     "agent_name": f"worker-{i // action.calls_per_worker}",
                 })
         elif isinstance(action, (Delegation, GatewayFailure, PolicyChange)):
+            # Calls accumulate and dispatch together, so anything that
+            # CHANGES STATE mid-sequence has to flush first. Without this a
+            # scenario like "call, revoke scope, call again" runs both calls
+            # under the post-revocation policy and the first one is wrongly
+            # denied — the benchmark reporting a product failure that is
+            # really an ordering bug in the driver.
+            self._flush()
             # Delegation: no native subagents (category declined).
             # GatewayFailure: induced by the subject's own transport, not here.
             # PolicyChange: subclass responsibility — it is product config.
             self._apply_non_call_action(action)
         return None
+
+    def _flush(self) -> None:
+        """Dispatch everything accumulated so far, preserving ordering."""
+        if self._calls:
+            self._dispatch()
+            self._calls = []
 
     def _apply_non_call_action(self, action: Action) -> None:
         """Override for policy changes / induced outages. Default: record."""
@@ -183,8 +196,8 @@ class PiRunner(StatefulRunner):
         )
 
     def collect_outcome(self):
-        if not self._declined and self._calls:
-            self._dispatch()
+        if not self._declined:
+            self._flush()
         return super().collect_outcome()
 
     #: Env var a subject uses to declare the tier for a process, if any.
