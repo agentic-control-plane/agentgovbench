@@ -76,6 +76,14 @@ if (spec.extensions?.length) {
   }
 }
 
+// Isolate HOME. Extensions look for operator credentials in ~/.acp and
+// friends; the ACP plugin explicitly falls back there when its env var is
+// empty. Without this, a run with no credential silently authenticates as
+// whoever is sitting at the machine — which is both the wrong measurement
+// and a leak of a personal credential into a benchmark.
+process.env.HOME = dir;
+process.env.USERPROFILE = dir;
+
 for (const [k, v] of Object.entries(spec.env ?? {})) process.env[k] = String(v);
 
 // One custom tool per distinct name the scenario calls. execute() firing IS

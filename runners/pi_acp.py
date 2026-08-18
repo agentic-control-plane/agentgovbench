@@ -80,6 +80,19 @@ class Runner(PiRunner):
             ),
             declined_categories={
                 **{f"{cat} (whole category)": why for cat, why in SUBSTRATE_DECLINED.items()},
+                "identity_propagation.05_anonymous_rejected": (
+                    "A harness plugin has no notion of an authenticated-but-"
+                    "anonymous caller. Either it holds a credential or it "
+                    "holds none — and holding none is not 'anonymous to ACP', "
+                    "it is ACP absent: the plugin logs UNGOVERNED and the call "
+                    "proceeds. So the scenario cannot distinguish rejection "
+                    "from non-participation here. Measurable on the HTTP path, "
+                    "which can present a request with no principal.\n"
+                    "Worth noting separately: no credential means UNGOVERNED "
+                    "AND ALLOWED, which is the front-door behaviour tracked in "
+                    "gatewaystack-connect#592-596, not something this "
+                    "benchmark discovered."
+                ),
                 "fail_mode_discipline.02_fail_open_honored": (
                     "ACP fails CLOSED here, and that is deliberate rather "
                     "than a miss. The plugin's documented posture is that an "
@@ -132,8 +145,26 @@ class Runner(PiRunner):
             self._fx = ApiRunner()
         return self._fx
 
+    #: Scenarios whose fan-out fills a rate-limit bucket. A later scenario
+    #: starting inside the 60s window inherits a partly-full bucket and its
+    #: calls are throttled — which reads as the product over-blocking when it
+    #: is the previous scenario's traffic. acp_api carries the same hold.
+    _RATE_HOLD_S = 62
+    _last_heavy_end = 0.0
+
+    def _is_rate_heavy(self, scenario) -> bool:
+        return scenario.category == "rate_limit_cascade" and any(
+            getattr(a, "calls_per_worker", 0) * getattr(a, "worker_count", 1) >= 30
+            for a in scenario.actions
+        )
+
     def setup(self, scenario) -> None:
         super().setup(scenario)
+        import time as _t
+        elapsed = _t.time() - Runner._last_heavy_end
+        if Runner._last_heavy_end and elapsed < self._RATE_HOLD_S:
+            _t.sleep(self._RATE_HOLD_S - elapsed)
+        self._heavy = self._is_rate_heavy(scenario)
         # The runner is constructed ONCE per run, so induced-outage state
         # survives into the next scenario unless cleared. It leaked: a
         # negative control that induces no failure was denied because the
@@ -217,6 +248,16 @@ class Runner(PiRunner):
         hold the default credential.
         """
         from runners.acp import UID_MAP
+        if not user:
+            # An anonymous call — the scenario's whole point. It must be SENT
+            # with no credential so the product gets to reject it. Skipping it
+            # for lack of a key meant identity_propagation.05 was never tested
+            # at all, and recorded as a failure for good measure.
+            return {
+                **self.driver_env,
+                "ACP_BEARER_TOKEN": "",
+                self.tier_env_var: tier,
+            }
         real_uid = UID_MAP.get(user, user)
         var = "ACP_KEY_" + real_uid.upper().replace("-", "_")
         key = os.environ.get(var, "").strip()
@@ -268,3 +309,10 @@ class Runner(PiRunner):
             f"{type(action).__name__} not yet handled by pi_acp — "
             "scenario setup incomplete, treat its result as unmeasured"
         )
+
+
+    def collect_outcome(self):
+        if getattr(self, "_heavy", False):
+            import time as _t
+            Runner._last_heavy_end = _t.time()
+        return super().collect_outcome()
