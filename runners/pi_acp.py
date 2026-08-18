@@ -133,6 +133,41 @@ class Runner(PiRunner):
     # an agent-held key on principle, and we honour that), the
     # isBenchmarkTenant guard, and stale per-user cleanup between scenarios.
 
+    def preflight(self) -> None:
+        """Refuse to score unless scenario policy can actually be installed.
+
+        Without this the run completes cleanly against whatever policy
+        happened to already be on the tenant, and reports a full scorecard.
+        That is not a degraded measurement, it is a measurement of nothing —
+        and it looks exactly like a real one. A pass with no policy
+        installed produced 11/32: entirely plausible, entirely meaningless,
+        and only caught because the per-scenario runner errors were read
+        rather than the totals.
+
+        Policy installation deliberately runs as the human operator rather
+        than under an agent-held key: ACP refuses policy writes from an API
+        key on principle, and the benchmark honours that instead of routing
+        around it.
+        """
+        super().preflight()
+        import os as _os
+        if _os.environ.get("AGB_POLICY_SETUP") != "firestore":
+            raise RuntimeError(
+                "pi_acp cannot install scenario policy, so nothing it scored "
+                "would reflect the scenario. Set AGB_POLICY_SETUP=firestore "
+                "and run as the operator (ACP refuses policy writes from an "
+                "API key by design). Aborting rather than emitting a "
+                "plausible-looking scorecard measured against whatever "
+                "policy is already on the tenant."
+            )
+        # Prove the path works now, not on the first scenario. A credential
+        # that can read but not write policy fails here rather than after
+        # twenty minutes of scoring.
+        try:
+            self._fixtures()
+        except Exception as e:
+            raise RuntimeError(f"policy fixture path unusable: {e!r}") from e
+
     def _fixtures(self):
         if getattr(self, "_fx", None) is None:
             import os as _os
