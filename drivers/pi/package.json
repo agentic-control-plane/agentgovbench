@@ -5,6 +5,7 @@
   "description": "Deterministic Pi executor for AgentGovBench. Python invokes this; it drives a real pi agent session with a scripted tool-call sequence and no model in the loop.",
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2"
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@microsoft/agent-governance-sdk": "^5.0.0"
   }
 }

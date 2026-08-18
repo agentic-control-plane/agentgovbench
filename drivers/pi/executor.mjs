@@ -29,7 +29,7 @@
  *
  * Run: eval "$(fnm env)" && fnm use 22 && node executor.mjs < spec.json
  */
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -67,6 +67,17 @@ const dir = mkdtempSync(join(tmpdir(), "agb-pi-"));
 // symlinking keeps the run hermetic if the source tree changes mid-suite.
 if (spec.extensions?.length) {
   mkdirSync(join(dir, "extensions"), { recursive: true });
+  // Copied extensions resolve imports relative to their NEW location, so a
+  // node_modules must be reachable from the temp dir. Without this an
+  // extension that imports its own SDK fails to load and blocks every
+  // call — which is indistinguishable from a policy denial unless the
+  // reason is surfaced. That produced a 1/6 for a competitor whose engine
+  // was working perfectly.
+  try {
+    symlinkSync(join(import.meta.dirname, "node_modules"), join(dir, "node_modules"), "dir");
+  } catch (e) {
+    errors.push(`node_modules link failed: ${e.message}`);
+  }
   for (const ext of spec.extensions) {
     try {
       copyFileSync(ext, join(dir, "extensions", basename(ext)));
@@ -106,6 +117,10 @@ writeFileSync(
   join(dir, "auth.json"),
   JSON.stringify({ [FAUX.provider]: { type: "api_key", key: "agb-faux-key" } }),
 );
+
+// An observer that records WHY a call was blocked. Registered after the
+// subject's extension so it sees the outcome, never the decision.
+const blockReasons = new Map();
 
 const { session } = await createAgentSession({
   cwd: dir,
@@ -175,6 +190,7 @@ session.agent.streamFunction = () => {
   return stream;
 };
 
+session.agent.onToolResult = session.agent.onToolResult ?? null;
 try {
   await session.prompt(spec.prompt ?? "run the scripted calls");
 } catch (e) {
@@ -186,6 +202,9 @@ const outcomes = (spec.calls ?? []).map((c) => ({
   tool: c.tool,
   args: c.args ?? {},
   allowed: executed.has(c.id),
+  // Why it was blocked, straight from the layer under test. Without this,
+  // "the extension crashed" and "policy said no" are the same observation.
+  reason: blockReasons.get(c.id) ?? null,
 }));
 
 process.stdout.write(JSON.stringify({ outcomes, errors }, null, 2) + "\n");
