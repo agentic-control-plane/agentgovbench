@@ -157,6 +157,7 @@ class PiRunner(StatefulRunner):
                 # Passed through for the extension to read; NOT scored.
                 "tier": action.agent_tier,
                 "as_user": action.as_user,
+                "as_tenant": action.as_tenant,
                 "agent_name": action.agent_name,
             })
         elif isinstance(action, ParallelFanOut):
@@ -167,6 +168,7 @@ class PiRunner(StatefulRunner):
                     "args": action.input,
                     "tier": action.agent_tier,
                     "as_user": action.as_user,
+                    "as_tenant": action.as_tenant,
                     "agent_name": f"worker-{i // action.calls_per_worker}",
                 })
         elif isinstance(action, (Delegation, GatewayFailure, PolicyChange)):
@@ -273,7 +275,10 @@ class PiRunner(StatefulRunner):
                 tool=o["tool"],
                 input=o.get("args", {}),
                 as_user=src.get("as_user", ""),
-                as_tenant=None,
+                # Which tenant the call was made in. Follows from WHICH USER'S
+                # KEY was used — keys are tenant-scoped — so it is the
+                # scenario's own tenant, carried through rather than guessed.
+                as_tenant=src.get("as_tenant"),
                 allowed=bool(o.get("allowed")),
                 reason=o.get("reason"),
                 agent_tier=src.get("tier"),

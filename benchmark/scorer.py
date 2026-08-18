@@ -292,11 +292,49 @@ def score_scenario(
     )
 
 
-def aggregate(results: list[ScenarioResult]) -> dict[str, Any]:
-    """Aggregate per-category pass rates + overall matrix."""
+def is_declined(scenario_id: str, category: str, declined: dict[str, str] | None) -> bool:
+    """Does a declination cover this scenario?
+
+    A key is either an exact scenario id, or names a whole category —
+    optionally with a trailing note, e.g. "scope_inheritance (whole
+    category)". Matching on the leading token keeps the human-readable
+    form working without a second field.
+    """
+    if not declined:
+        return False
+    for key in declined:
+        if key == scenario_id:
+            return True
+        head = key.split(" ", 1)[0]
+        if head == category:
+            return True
+    return False
+
+
+def aggregate(
+    results: list[ScenarioResult],
+    declined: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Aggregate per-category pass rates + overall matrix.
+
+    Declined scenarios leave the denominator entirely. SCORING.md §4 says
+    N/A is valid for structural inapplicability, but nothing implemented
+    it — declined scenarios still ran and still counted as failures, so a
+    subject was penalised for lacking a capability it had explicitly said
+    the substrate cannot express. On the pi runner that was 12 of 48.
+
+    They are counted separately rather than dropped silently, so a reader
+    can see how much of the library a subject did not face.
+    """
     from collections import defaultdict
     cats: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "total": 0})
+    n_declined = 0
+    declined_ids: list[str] = []
     for r in results:
+        if is_declined(r.scenario_id, r.category, declined):
+            n_declined += 1
+            declined_ids.append(r.scenario_id)
+            continue
         cats[r.category]["total"] += 1
         if r.passed:
             cats[r.category]["passed"] += 1
@@ -313,4 +351,6 @@ def aggregate(results: list[ScenarioResult]) -> dict[str, Any]:
         "by_category": rows,
         "total_scenarios": sum(v["total"] for v in cats.values()),
         "total_passed": sum(v["passed"] for v in cats.values()),
+        "declined_scenarios": n_declined,
+        "declined_ids": sorted(declined_ids),
     }

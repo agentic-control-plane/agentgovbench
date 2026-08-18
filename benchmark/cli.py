@@ -204,7 +204,7 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                     if not a.passed:
                         click.echo(f"    ✗ {a.assertion.kind} — {a.note}")
 
-    agg = aggregate(results)
+    agg = aggregate(results, runner_inst.metadata.declined_categories)
 
     _print_scorecard(runner_inst, agg, results)
 
