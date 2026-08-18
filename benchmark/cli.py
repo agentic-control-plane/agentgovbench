@@ -159,6 +159,9 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 # Waiting is the harness's job, not the product's. Handling
                 # it here keeps every adapter identical on this axis.
                 if isinstance(action, Wait):
+                    # Let a batching runner send what it has BEFORE time
+                    # advances, or the pre-wait calls land after it.
+                    runner_inst.flush()
                     time.sleep(action.seconds)
                     continue
                 runner_inst.execute_action(action)

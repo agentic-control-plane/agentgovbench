@@ -100,6 +100,16 @@ class BaseRunner(abc.ABC):
         """
         return None
 
+    def flush(self) -> None:
+        """Dispatch anything the runner has buffered.
+
+        Runners that batch calls must send what they have before the harness
+        advances wall-clock time, or a "call, wait, call" scenario runs both
+        calls AFTER the wait — which silently defeats every recovery test.
+        Default is a no-op for runners that dispatch immediately.
+        """
+        return None
+
     def collect_outcome(self) -> RunOutcome:
         """Assemble the RunOutcome from accumulated tool outcomes + audit.
         Default assembles from ``_tool_outcomes`` list the runner appends

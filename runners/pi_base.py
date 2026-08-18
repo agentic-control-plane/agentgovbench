@@ -185,6 +185,11 @@ class PiRunner(StatefulRunner):
             self._apply_non_call_action(action)
         return None
 
+    def flush(self) -> None:
+        """Harness-facing flush (see BaseRunner.flush)."""
+        if not self._declined:
+            self._flush()
+
     def _flush(self) -> None:
         """Dispatch everything accumulated so far, preserving ordering."""
         if self._calls:

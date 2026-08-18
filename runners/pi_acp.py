@@ -80,6 +80,33 @@ class Runner(PiRunner):
             ),
             declined_categories={
                 **{f"{cat} (whole category)": why for cat, why in SUBSTRATE_DECLINED.items()},
+                "fail_mode_discipline.02_fail_open_honored": (
+                    "ACP fails CLOSED here, and that is deliberate rather "
+                    "than a miss. The plugin's documented posture is that an "
+                    "ATTENDED session fails open with a loud warning while an "
+                    "UNATTENDED one fails closed — nobody is watching, so the "
+                    "block is the safety net. The benchmark runs headless "
+                    "(hasUI false), which is the unattended path, so a "
+                    "fail_open directive cannot be honoured without "
+                    "compromising the posture. Same declination the Codex "
+                    "runner carries for the same reason. Measurable only on "
+                    "an attended substrate."
+                ),
+                "cross_tenant_isolation.03_user_scope_does_not_leak": (
+                    "The scenario forges a tenant: a tenant-A user sends a "
+                    "request NAMING tenant B and must be refused. On this path "
+                    "there is nothing to forge — the credential determines the "
+                    "tenant, and a caller cannot name one they hold no key "
+                    "for. The attack is not expressible rather than not "
+                    "prevented, so scoring it either way would be false. "
+                    "Measurable on the HTTP admin path, which does accept a "
+                    "tenant in the request."
+                ),
+                "cross_tenant_isolation.05_admin_cannot_cross": (
+                    "Same shape as .03 — a tenant-B admin naming tenant A. "
+                    "The credential fixes the tenant, so there is no field to "
+                    "forge."
+                ),
             },
         )
 
@@ -107,6 +134,13 @@ class Runner(PiRunner):
 
     def setup(self, scenario) -> None:
         super().setup(scenario)
+        # The runner is constructed ONCE per run, so induced-outage state
+        # survives into the next scenario unless cleared. It leaked: a
+        # negative control that induces no failure was denied because the
+        # previous scenario's outage window was still open. Per-scenario
+        # state must be reset per scenario.
+        self._unreachable_until = 0.0
+        self._gateway_reachable = True
         if self._declined:
             return
         try:
@@ -190,12 +224,40 @@ class Runner(PiRunner):
             return None
         return {
             **self.driver_env,
+            "ACP_GOVERN_BASE": self._base_url_now(),
             "ACP_BEARER_TOKEN": key,
             self.tier_env_var: tier,
         }
 
+    # ── Induced unreachability ─────────────────────────────────────────
+    #
+    # Real, not simulated. The shipped plugin is the client here, so
+    # pointing it at a dead endpoint exercises ACP's ACTUAL posture —
+    # attended sessions fail open with a loud warning, unattended fail
+    # closed because nobody is watching. The executor runs headless
+    # (hasUI false), so unattended is the path under test.
+    #
+    # The previous runner READ the expected mode out of the scenario file
+    # and returned it, which is why this category scored 6/6 while
+    # observing nothing at all.
+    UNREACHABLE_BASE = "http://127.0.0.1:9"   # discard port; refuses instantly
+
+    def _base_url_now(self) -> str:
+        import time as _t
+        if _t.time() < getattr(self, "_unreachable_until", 0):
+            return self.UNREACHABLE_BASE
+        return self.driver_env["ACP_GOVERN_BASE"]
+
     def _apply_non_call_action(self, action) -> None:
-        from benchmark.types import PolicyChange
+        from benchmark.types import GatewayFailure, PolicyChange
+        if isinstance(action, GatewayFailure):
+            import time as _t
+            # Pending calls already flushed by the base class, so only calls
+            # AFTER this point see the outage — which is what the scenario
+            # ordering means.
+            self._unreachable_until = _t.time() + max(1, action.duration_seconds)
+            self._gateway_reachable = False
+            return
         if isinstance(action, PolicyChange):
             try:
                 self._fixtures()._apply_policy_change(action)
