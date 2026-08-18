@@ -102,12 +102,7 @@ class Runner(PiRunner):
                     "session start. Unmeasured rather than failed; the "
                     "product may well handle revocation fine."
                 ),
-                "audit_completeness (whole category)": (
-                    "The npm SDK exposes AuditLogger, but this adapter does "
-                    "not wire it — reading an audit trail we did not "
-                    "configure would score our integration rather than the "
-                    "product. Declined until wired, and it should be wired."
-                ),
+
             },
         )
 
@@ -117,6 +112,7 @@ class Runner(PiRunner):
         super().setup(scenario)
         if self._declined:
             return
+        self._audit_file = None
         docs = self._to_agt_policies(scenario)
         fh = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
         json.dump(docs, fh)
@@ -211,9 +207,47 @@ class Runner(PiRunner):
                 })
         return docs
 
+    def audit_log(self):
+        """Read AGT's hash-chained audit trail.
+
+        Its entry model is {timestamp, agentId, action, decision} plus the
+        chain. There is no reason, trace id, tenant or tier — so assertions
+        on those will fail, and that is a real capability difference rather
+        than an adapter gap. Recording it honestly is the point.
+        """
+        import json as _json
+        from benchmark.types import AuditEntry
+        path = getattr(self, "_audit_file", None)
+        if not path or not os.path.exists(path):
+            return list(self._audit)
+        try:
+            raw = _json.loads(open(path).read())
+        except Exception as e:
+            self._errors.append(f"AGT audit read failed: {e!r}")
+            return list(self._audit)
+        out = []
+        for e in (raw if isinstance(raw, list) else raw.get("entries", [])):
+            out.append(AuditEntry(
+                timestamp=str(e.get("timestamp", "")),
+                tenant=None,          # AGT has no tenant concept
+                actor_uid=e.get("agentId"),
+                actor_email=None,
+                tool=e.get("action", ""),
+                decision="deny" if e.get("decision") == "deny" else "allow",
+                reason=None,          # not in AGT's entry model
+                trace_id=None,        # not in AGT's entry model
+            ))
+        return list(self._audit) + out
+
     def _env_for_group(self, user: str, tier: str):
+        import tempfile as _tf
+        if not getattr(self, "_audit_file", None):
+            fh = _tf.NamedTemporaryFile("w", suffix=".json", delete=False)
+            fh.close()
+            self._audit_file = fh.name
         return {
             **self.driver_env,
+            "AGB_AGT_AUDIT": self._audit_file,
             "AGB_AGT_POLICY": self._policy_file or "",
             "AGB_AGT_AGENT": user,
             "AGB_AGT_USER": user,

@@ -32,17 +32,23 @@
  *                        the same posture ACP takes, so neither product is
  *                        advantaged by the substrate being unattended.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 export default function agt(pi: any): void {
   const policyPath = process.env.AGB_AGT_POLICY;
+  const auditPath = process.env.AGB_AGT_AUDIT;
   let engine: any = null;
+  let audit: any = null;
   let loadError: string | null = null;
 
   const ready = (async () => {
     try {
       const mod: any = await import("@microsoft/agent-governance-sdk");
       engine = new mod.PolicyEngine();
+      // AGT ships a hash-chained AuditLogger. Wire it, rather than
+      // declining the audit categories — declining a capability the
+      // product HAS would understate it.
+      audit = new mod.AuditLogger();
       if (policyPath) {
         const doc = JSON.parse(readFileSync(policyPath, "utf8"));
         for (const p of Array.isArray(doc) ? doc : [doc]) engine.loadPolicy(p);
@@ -80,6 +86,21 @@ export default function agt(pi: any): void {
     }
 
     const action = result?.action ?? (result?.allowed ? "allow" : "deny");
+
+    if (audit) {
+      try {
+        // AGT's entry model is {agentId, action, decision} plus the hash
+        // chain. It carries no reason, trace id, tenant or tier — that is
+        // the product's shape, not an omission by this adapter, and the
+        // scorecard should reflect it honestly either way.
+        audit.log({
+          agentId: context.user || agentDid,
+          action: event.toolName,
+          decision: action === "deny" || action === "require_approval" ? "deny" : "allow",
+        });
+        if (auditPath) writeFileSync(auditPath, audit.exportJSON());
+      } catch { /* audit must never change the decision */ }
+    }
     if (action === "deny") {
       return { block: true, reason: result?.reason ?? `denied by ${result?.matchedRule ?? "policy"}` };
     }
