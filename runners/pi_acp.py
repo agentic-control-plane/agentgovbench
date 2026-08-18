@@ -228,11 +228,28 @@ class Runner(PiRunner):
             for u in t_.users
             if u.email
         }
+        # CRITICAL: a repaired field is HARNESS evidence, not product
+        # evidence. The gateway did not record this uid — the runner
+        # reconstructed it from the scenario fixture. Leaving source at its
+        # "product" default meant the scorer counted an answer that this
+        # runner supplied, which is precisely the self-scoring that
+        # docs/measurement-discipline.md forbids and precisely the
+        # asymmetry every competitor adapter was penalised by: their
+        # columns were scored on what their adapters read, ours on what our
+        # runner filled in.
+        #
+        # Marking it harness means the attribution assertions fail until
+        # ACP writes the uid itself. That failure is the correct result and
+        # it is a real product gap worth fixing at the source.
         for e in entries:
             if (e.actor_uid or "").startswith("apikey:") and e.actor_email:
                 resolved = by_email.get(e.actor_email)
                 if resolved:
                     e.actor_uid = resolved
+                    e.source = "harness"
+                    e.extra = {**(e.extra or {}),
+                               "uid_repaired_by": "runner_email_join",
+                               "product_recorded_uid": "apikey:<redacted>"}
         return list(self._audit) + list(entries)
 
     def _env_for_group(self, user: str, tier: str, tenant: str = ""):

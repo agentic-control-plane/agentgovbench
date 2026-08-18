@@ -123,3 +123,50 @@ points. *(cf. otel)* They disclose that their normalization is
 manipulable by cohort membership and publish a transform-sensitivity
 table; our equivalent is publishing the floor and the
 negative-control split.
+
+## 10. Assert identity in; never repair it back out
+
+Two operations look similar and must be treated differently, because the
+line between them is the line between measuring a product and grading your
+own homework.
+
+**Asserting a principal INTO the product is allowed, for every subject.**
+Telling a governance layer who the caller is is what every real deployment
+does. ACP's runner mints a per-user token and posts `agent_tier`,
+`agent_name` and `agent_chain`. The OpenAI Agents SDK's equivalent is
+`Runner.run(context=principal)`; AGT's is `AgentIdentity{sponsor}` in an
+`IdentityRegistry`. These are the same operation and must be permitted
+uniformly. A subject scored 1/6 because its adapter did not use the
+identity carrier the SDK ships is being scored on adapter diligence.
+
+**Repairing what the product did NOT record is harness evidence.** If the
+runner reconstructs a field the product never wrote — by joining to the
+scenario fixture, by inference, by lookup — that field is
+`source="harness"` and the scorer strips it. The assertion then fails, and
+that failure is the correct answer: it is a real product gap.
+
+The test is not "did the runner touch this field" but **"if the product
+were replaced by a no-op, would this value still appear?"** If yes, it is
+the harness's answer, not the product's.
+
+### How this rule was found
+
+Every adapter was penalised for what it failed to read, while our own
+column was credited for what our runner filled in:
+
+- `pi_acp` overwrote `actor_uid` from the scenario fixture (ACP records
+  `apikey:<keyId>`, not the uid) and left `source` at its `"product"`
+  default, so the scorer counted a uid the gateway never wrote.
+- The OpenAI adapter refused to pass `context=` on the explicit grounds
+  that supplying identity "scores the subject on the runner's knowledge" —
+  while the ACP adapter did exactly that and was scored for it.
+- The AGT adapter discarded `PolicyDecisionResult.reason`, which AGT
+  returns on every decision, and the writeup reported the absence as a
+  product limit.
+
+Three vendor engineers found this independently, from three directions, in
+a few hours. The discrimination invariants did not: they test the scorer,
+and all of these live in the drivers and adapters. A benchmark can be
+rigorous about scoring and still be systematically biased by how carefully
+each adapter was written — and the bias will point wherever the author's
+attention was.
