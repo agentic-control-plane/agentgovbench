@@ -61,16 +61,26 @@ MIN_NODE_MAJOR = 22
 # module docstring.
 SUBSTRATE_DECLINED = {
     "delegation_provenance": (
-        "pi has no native subagents. Its shipped delegation example spawns "
-        "child processes with no parent-session link, so a delegation chain "
-        "is not observable. Injecting a correlation ID would mean scoring a "
-        "mechanism the benchmark authored rather than one the harness "
-        "provides. Scored against framework-native subjects instead."
+        "pi CAN delegate — it ships a subagent extension — but the child is "
+        "a real `pi` subprocess launched with --model and reading its own "
+        "config, so it needs a live model and API key. That breaks the "
+        "determinism and zero-cost properties the whole benchmark rests on: "
+        "what a child chooses to call would be decided by an LLM, not by "
+        "the scenario. Scripting a fake child instead would mean scoring a "
+        "delegation mechanism the benchmark authored rather than one anybody "
+        "runs. Measured against framework-native subjects (LangGraph, "
+        "OpenAI Agents SDK, Google ADK), which delegate in-process and can "
+        "be driven deterministically.\n"
+        "NOTE: an earlier version of this said pi has no subagents. That was "
+        "wrong — usage.md says it ships no BUILT-IN subagents, and the "
+        "extension exists. The blocker is determinism, not absence."
     ),
     "scope_inheritance": (
-        "Depends on a parent agent delegating narrowed scope to a child; pi "
-        "has no native subagent to narrow. Same reasoning as "
-        "delegation_provenance."
+        "Same blocker as delegation_provenance: narrowing a child's scope "
+        "requires a child, and pi's child is a model-driven subprocess. The "
+        "property itself is real and worth testing — whether a control "
+        "plane's identity follows into a process it did not create — and it "
+        "is testable on the framework-native subjects."
     ),
 }
 
