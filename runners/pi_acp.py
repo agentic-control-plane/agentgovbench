@@ -276,15 +276,29 @@ class Runner(PiRunner):
         # Marking it harness means the attribution assertions fail until
         # ACP writes the uid itself. That failure is the correct result and
         # it is a real product gap worth fixing at the source.
+        # The repair is GONE. actor_uid stays exactly as ACP wrote it —
+        # `apikey:<keyId>` — because that is what the product recorded, and
+        # attribution assertions comparing against a scenario uid should
+        # fail. They now do, and that failure is the real finding: ACP
+        # records the credential, not the person, so answering "who did
+        # this" needs a join to a key doc that may since have been revoked.
+        #
+        # An earlier pass marked the whole entry source="harness" instead.
+        # That was too blunt: it stripped the timestamp, tool, decision and
+        # reason — all genuinely product-written — along with the one
+        # synthesised field, and took audit_completeness to 0/6. Provenance
+        # is per-entry, so the entry must stay product-sourced and simply
+        # carry what the product actually said.
+        #
+        # The resolved uid is kept in extra/ for forensic readability only.
+        # Nothing scores off it.
         for e in entries:
             if (e.actor_uid or "").startswith("apikey:") and e.actor_email:
                 resolved = by_email.get(e.actor_email)
                 if resolved:
-                    e.actor_uid = resolved
-                    e.source = "harness"
                     e.extra = {**(e.extra or {}),
-                               "uid_repaired_by": "runner_email_join",
-                               "product_recorded_uid": "apikey:<redacted>"}
+                               "uid_resolved_by_email_join": resolved,
+                               "note": "runner-side join, not scored"}
         return list(self._audit) + list(entries)
 
     def _env_for_group(self, user: str, tier: str, tenant: str = ""):
