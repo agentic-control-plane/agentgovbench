@@ -84,18 +84,19 @@ class Runner(PiRunner):
             ),
             declined_categories={
                 **{f"{cat} (whole category)": why for cat, why in SUBSTRATE_DECLINED.items()},
-                "cross_tenant_isolation (whole category)": (
-                    "AGT has no tenant concept — policies scope to agents, "
-                    "not tenants. Scoring zero would penalise it for lacking "
-                    "a dimension it never claimed; this is the structural "
-                    "inapplicability SCORING.md reserves N/A for."
-                ),
                 "fail_mode_discipline (whole category)": (
                     "AGT evaluates IN-PROCESS. There is no control plane to "
                     "become unreachable, so a fail mode is not a property it "
                     "has. Note the flip side, which belongs in the writeup "
                     "rather than the score: in-process evaluation cannot be "
                     "cut off by a network partition at all."
+                ),
+                "cross_tenant_isolation.01_policy_does_not_leak": (
+                    "Same adapter limit as per_user .06: the scenario edits "
+                    "policy mid-run and this adapter loads AGT policy once "
+                    "at session start. Unmeasured rather than failed — AGT "
+                    "may well handle a reload fine, and scoring it here "
+                    "would report an adapter gap as a product verdict."
                 ),
                 "per_user_policy_enforcement.06_revoked_scope_immediate": (
                     "Needs a mid-scenario policy change, which this adapter "
@@ -133,6 +134,26 @@ class Runner(PiRunner):
             tools_by_name = {tl.name: tl for tl in scenario.setup.tools}
             for user in t.users:
                 rules: list[dict] = []
+
+                # Bind this user to their own tenant. AGT has no built-in
+                # tenancy, but it does ship an expression evaluator that
+                # supports inequality over an arbitrary context, and the
+                # adapter puts `tenant` in that context — so the isolation
+                # IS expressible and it would be unfair to score AGT as
+                # though it were not. Highest priority: a tenant mismatch
+                # should beat every allow below it.
+                #
+                # Worth naming the difference rather than burying it: this
+                # is a rule someone has to remember to write, per user. A
+                # control plane where the credential carries the tenant has
+                # nothing to forget. Same verdict, different failure mode
+                # when a human is sloppy.
+                rules.append({
+                    "name": f"tenant-bind-{user.uid}",
+                    "condition": f"tenant != '{t.id}'",
+                    "ruleAction": "deny",
+                    "priority": 120,
+                })
 
                 # Most specific first: AGT sorts by priority, higher first.
                 for tool_name, tiers in (t.policy.tools or {}).items():
@@ -240,7 +261,18 @@ class Runner(PiRunner):
             ))
         return list(self._audit) + out
 
-    def _env_for_group(self, user: str, tier: str):
+    def _home_tenant(self, user: str) -> str:
+        """Which tenant this user belongs to, per the scenario fixture."""
+        sc = self._scenario
+        if not sc:
+            return ""
+        for t in sc.setup.tenants:
+            for u in t.users:
+                if u.uid == user:
+                    return t.id
+        return sc.setup.tenants[0].id if sc.setup.tenants else ""
+
+    def _env_for_group(self, user: str, tier: str, tenant: str = ""):
         import tempfile as _tf
         if not getattr(self, "_audit_file", None):
             fh = _tf.NamedTemporaryFile("w", suffix=".json", delete=False)
@@ -252,6 +284,13 @@ class Runner(PiRunner):
             "AGB_AGT_POLICY": self._policy_file or "",
             "AGB_AGT_AGENT": user,
             "AGB_AGT_USER": user,
+            # The extension has always read this; nothing ever set it, so
+            # every tenant-conditioned rule evaluated against "".
+            #
+            # An unspecified tenant means "the user's own", not "no tenant".
+            # Passing "" made the tenant-binding rule below fire on every
+            # single-tenant scenario and deny the entire suite.
+            "AGB_AGT_TENANT": tenant or self._home_tenant(user),
             self.tier_env_var: tier,
         }
 

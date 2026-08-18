@@ -235,7 +235,7 @@ class Runner(PiRunner):
                     e.actor_uid = resolved
         return list(self._audit) + list(entries)
 
-    def _env_for_group(self, user: str, tier: str):
+    def _env_for_group(self, user: str, tier: str, tenant: str = ""):
         """Each benchmark user acts with its OWN key.
 
         resolveEffectiveUid() returns a key's `createdBy`, so a key minted

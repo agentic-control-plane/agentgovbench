@@ -229,13 +229,18 @@ class PiRunner(StatefulRunner):
         # authenticates with one credential that IS its identity. A scenario
         # mixing users or tiers therefore needs a session each, which is
         # also how it works in production — a key belongs to a person.
-        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        # Tenant joins the key because a session belongs to one tenant the
+        # same way it belongs to one principal. Leaving it out meant every
+        # subject evaluated tenant-scoped policy against a blank tenant.
+        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for c in self._calls:
             groups.setdefault(
-                (c.get("as_user") or "", c.get("tier") or "interactive"), []
+                (c.get("as_user") or "",
+                 c.get("tier") or "interactive",
+                 c.get("as_tenant") or ""), []
             ).append(c)
-        for (user, tier), calls in groups.items():
-            env = self._env_for_group(user, tier)
+        for (user, tier, tenant), calls in groups.items():
+            env = self._env_for_group(user, tier, tenant)
             if env is None:
                 self._errors.append(
                     f"no credential for user {user!r} — its calls were not "
@@ -244,8 +249,9 @@ class PiRunner(StatefulRunner):
                 continue
             self._dispatch_group(calls, env)
 
-    def _env_for_group(self, user: str, tier: str) -> Optional[dict[str, str]]:
-        """Env for one (user, tier) session. None means "cannot run this group".
+    def _env_for_group(self, user: str, tier: str,
+                       tenant: str = "") -> Optional[dict[str, str]]:
+        """Env for one (user, tier, tenant) session. None means "cannot run".
 
         Subclasses that authenticate per user override this to select that
         user's credential.
