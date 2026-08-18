@@ -118,11 +118,18 @@ writeFileSync(
   JSON.stringify({ [FAUX.provider]: { type: "api_key", key: "agb-faux-key" } }),
 );
 
-// An observer that records WHY a call was blocked. Registered after the
-// subject's extension so it sees the outcome, never the decision.
+// WHY a call was blocked, captured from the subject's own handler return
+// value. This was previously an empty Map that nothing ever wrote to, so
+// every outcome for every subject reported reason: null — including the
+// runs where an integration was silently broken. Without a reason, "the
+// extension crashed" and "policy said no" are the same observation, which
+// is exactly how a working competitor engine was once scored 1/6.
 const blockReasons = new Map();
 
-const { session } = await createAgentSession({
+/** Fatal instrument failures. Any entry here invalidates the whole run. */
+const fatal = [];
+
+const { session, extensionsResult } = await createAgentSession({
   cwd: dir,
   agentDir: dir,
   model: FAUX,
@@ -134,6 +141,76 @@ const { session } = await createAgentSession({
   settingsManager: SettingsManager.create(dir, dir),
   customTools,
 });
+
+// ── Instrument self-check ─────────────────────────────────────────────
+//
+// Three failure modes were previously indistinguishable from a real
+// product verdict, and all three fail SILENTLY:
+//
+//   1. The extension fails to import. No tool_call handler is registered,
+//      every call executes, and the scorecard reads "the product allowed
+//      it." Fails OPEN and looks like a permissive product.
+//   2. The extension throws inside tool_call. pi's emitToolCall is the one
+//      emitter without a try/catch, so the throw propagates and blocks the
+//      tool. Fails CLOSED and looks like a paranoid product.
+//   3. The handler returns a block with a reason, and the harness discards
+//      it, so a crash and a policy denial are the same observation.
+//
+// Between them, a broken integration could land anywhere from 0 to
+// near-perfect with nothing in the output to say so. An instrument that
+// cannot detect its own failure is not an instrument.
+
+if (spec.extensions?.length) {
+  for (const e of extensionsResult?.errors ?? []) {
+    fatal.push(`extension failed to load: ${e.path}: ${e.error}`);
+  }
+
+  // A subject was supplied but nothing registered a decision point. Every
+  // call would execute unimpeded and score as "allowed by the product".
+  const loaded = extensionsResult?.extensions ?? [];
+  const withToolCall = loaded.filter(
+    (ext) => (ext.handlers?.get("tool_call")?.length ?? 0) > 0,
+  );
+  if (withToolCall.length === 0) {
+    fatal.push(
+      `${spec.extensions.length} extension(s) supplied but none registered a ` +
+        `tool_call handler — there is no decision point, so every call would ` +
+        `execute and be scored as permitted by the product`,
+    );
+  }
+
+  // Wrap each registered handler to record its verdict. The wrapper is
+  // strictly an observer: it forwards the original return value untouched,
+  // and a throw is recorded and rethrown so pi's fail-closed behaviour is
+  // preserved rather than papered over.
+  for (const ext of loaded) {
+    const handlers = ext.handlers?.get("tool_call");
+    if (!handlers?.length) continue;
+    for (let i = 0; i < handlers.length; i++) {
+      const original = handlers[i];
+      handlers[i] = async (event, ...rest) => {
+        const id = event?.toolCallId ?? event?.id;
+        try {
+          const result = await original(event, ...rest);
+          if (result?.block) {
+            blockReasons.set(
+              id,
+              result.reason ?? "blocked without a stated reason",
+            );
+          }
+          return result;
+        } catch (err) {
+          const msg = String(err?.message ?? err).split("\n")[0];
+          // Distinguishes a crash from a policy denial in the output, and
+          // records it as an instrument failure rather than a verdict.
+          blockReasons.set(id, `EXTENSION THREW: ${msg}`);
+          fatal.push(`extension threw in tool_call for ${id}: ${msg}`);
+          throw err;
+        }
+      };
+    }
+  }
+}
 
 // The faux provider must exist in the registry BEFORE auth resolution, or
 // lookup fails for a provider it has never heard of. A key alone is not enough.
@@ -207,5 +284,7 @@ const outcomes = (spec.calls ?? []).map((c) => ({
   reason: blockReasons.get(c.id) ?? null,
 }));
 
-process.stdout.write(JSON.stringify({ outcomes, errors }, null, 2) + "\n");
+process.stdout.write(
+  JSON.stringify({ outcomes, errors, fatal }, null, 2) + "\n",
+);
 process.exit(0);

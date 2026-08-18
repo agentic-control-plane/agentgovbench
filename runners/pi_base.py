@@ -289,6 +289,23 @@ class PiRunner(StatefulRunner):
         for err in result.get("errors", []):
             self._errors.append(f"pi: {err}")
 
+        # Instrument failures are NOT verdicts. A subject whose extension
+        # failed to load, or threw inside tool_call, produces outcomes that
+        # look exactly like a permissive or a paranoid product — so the
+        # scenario is marked unmeasured rather than scored. Raising here is
+        # deliberate: cli.py turns an exception into a FAIL with the message
+        # attached, which is loud, and the alternative is a plausible number
+        # nobody can tell is wrong.
+        instrument_failures = result.get("fatal", [])
+        if instrument_failures:
+            self._instrument_failed = True
+            for f in instrument_failures:
+                self._errors.append(f"INSTRUMENT FAILURE — not a product verdict: {f}")
+            raise RuntimeError(
+                "pi executor instrument self-check failed: "
+                + "; ".join(instrument_failures[:3])
+            )
+
         by_id = {c["id"]: c for c in calls}
         for o in result.get("outcomes", []):
             src = by_id.get(o["id"], {})
