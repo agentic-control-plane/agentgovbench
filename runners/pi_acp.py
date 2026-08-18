@@ -117,6 +117,31 @@ class Runner(PiRunner):
             # meaningless full runs earlier this week.
             self._errors.append(f"fixture install failed: {e!r}")
 
+    def _env_for_group(self, user: str, tier: str):
+        """Each benchmark user acts with its OWN key.
+
+        resolveEffectiveUid() returns a key's `createdBy`, so a key minted
+        with createdBy="agb-alice" genuinely acts as Alice. That is how the
+        product is designed — a credential belongs to a person — and it is
+        the only way per-user policy can bind through a harness plugin,
+        which has no impersonation mechanism.
+
+        Returns None when a user has no key, so the scenario is recorded as
+        unmeasured rather than silently attributed to whoever happened to
+        hold the default credential.
+        """
+        from runners.acp import UID_MAP
+        real_uid = UID_MAP.get(user, user)
+        var = "ACP_KEY_" + real_uid.upper().replace("-", "_")
+        key = os.environ.get(var, "").strip()
+        if not key:
+            return None
+        return {
+            **self.driver_env,
+            "ACP_BEARER_TOKEN": key,
+            self.tier_env_var: tier,
+        }
+
     def _apply_non_call_action(self, action) -> None:
         from benchmark.types import PolicyChange
         if isinstance(action, PolicyChange):

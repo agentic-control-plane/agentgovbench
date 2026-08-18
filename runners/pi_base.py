@@ -194,14 +194,33 @@ class PiRunner(StatefulRunner):
     tier_env_var: Optional[str] = None
 
     def _dispatch(self) -> None:
-        if not self.tier_env_var:
-            self._dispatch_group(self._calls, {})
-            return
-        groups: dict[str, list[dict[str, Any]]] = {}
+        # One executor process per (user, tier). Neither is expressible
+        # per-call: pi has no tier concept, and a harness plugin
+        # authenticates with one credential that IS its identity. A scenario
+        # mixing users or tiers therefore needs a session each, which is
+        # also how it works in production — a key belongs to a person.
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for c in self._calls:
-            groups.setdefault(c.get("tier") or "interactive", []).append(c)
-        for tier, calls in groups.items():
-            self._dispatch_group(calls, {self.tier_env_var: tier})
+            groups.setdefault(
+                (c.get("as_user") or "", c.get("tier") or "interactive"), []
+            ).append(c)
+        for (user, tier), calls in groups.items():
+            env = self._env_for_group(user, tier)
+            if env is None:
+                self._errors.append(
+                    f"no credential for user {user!r} — its calls were not "
+                    "dispatched, so this scenario is unmeasured rather than failed"
+                )
+                continue
+            self._dispatch_group(calls, env)
+
+    def _env_for_group(self, user: str, tier: str) -> Optional[dict[str, str]]:
+        """Env for one (user, tier) session. None means "cannot run this group".
+
+        Subclasses that authenticate per user override this to select that
+        user's credential.
+        """
+        return {self.tier_env_var: tier} if self.tier_env_var else {}
 
     def _dispatch_group(self, calls: list[dict[str, Any]], extra_env: dict[str, str]) -> None:
         spec = {
