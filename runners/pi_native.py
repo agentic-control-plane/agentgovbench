@@ -31,6 +31,7 @@ class Runner(PiRunner):
         return RunnerMetadata(
             name="pi_native",
             version="0.1.0",
+            governance_source="none",
             product="pi (no governance layer)",
             vendor="earendil-works/pi",
             notes=(

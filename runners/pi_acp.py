@@ -69,6 +69,7 @@ class Runner(PiRunner):
         return RunnerMetadata(
             name="pi_acp",
             version="0.1.0",
+            governance_source="product",
             product="pi + Agentic Control Plane",
             vendor="agenticcontrolplane.com",
             notes=(

@@ -29,6 +29,35 @@ DEFAULT_SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios"
 DEFAULT_RUNNERS_PACKAGE = "runners"
 
 
+_GOVERNANCE_SOURCE_BANNERS = {
+    "seam": (
+        "DECISIONS CAME FROM THE RUNNER, NOT THE SUBJECT.\n"
+        "  This subject provides an interception point but ships no policy\n"
+        "  engine, so the runner supplied the decision logic. These scores\n"
+        "  measure whether the seam is expressive enough to carry a policy.\n"
+        "  They do NOT mean the subject enforces one. Do not compare these\n"
+        "  numbers head-to-head against a product-sourced column."
+    ),
+    "none": (
+        "NO INTERCEPTION POINT. Baseline subject — scores describe what\n"
+        "  happens when nothing governs the calls."
+    ),
+}
+
+
+def _echo_governance_source(source: str) -> None:
+    """Print who actually made the decisions, when it is not the product.
+
+    A scorecard where one column's verdicts come from a vendor engine and
+    another's come from the benchmark author is not a comparison, and the
+    difference is invisible in the numbers. It gets a banner, not a
+    footnote.
+    """
+    banner = _GOVERNANCE_SOURCE_BANNERS.get(source)
+    if banner:
+        click.echo(f"Governance source: {source.upper()} — {banner}")
+
+
 def _load_runner(name: str) -> BaseRunner:
     """Load a runner by its module name under the runners/ package.
 
@@ -246,6 +275,7 @@ def _print_scorecard(runner_inst: BaseRunner, agg: dict, results: list[ScenarioR
     click.echo(f"AgentGovBench  spec v{SPEC_VERSION}  library {SCENARIO_LIBRARY_VERSION}")
     click.echo(f"Runner: {meta.name} ({meta.product} {meta.version})"
                + (f" — {meta.vendor}" if meta.vendor else ""))
+    _echo_governance_source(getattr(meta, "governance_source", "product"))
     click.echo("=" * 70)
     click.echo()
     click.echo(f"{'Category':<36} {'Pass':>6} {'Rate':>8}")

@@ -71,6 +71,7 @@ class Runner(PiRunner):
         return RunnerMetadata(
             name="pi_agt",
             version="0.1.0",
+            governance_source="product",
             product="pi + Microsoft Agent Governance Toolkit",
             vendor="microsoft/agent-governance-toolkit",
             notes=(
