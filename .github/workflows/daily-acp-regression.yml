@@ -1,0 +1,55 @@
+name: Daily ACP regression
+
+# Runs the full scenario set against production ACP every day and fails if
+# any scenario that passes in the committed baseline fails now. The key is a
+# gsk_ key on the dedicated `agentgovbench` benchmark workspace only, with
+# bench.impersonate + admin.audit.read — it cannot touch a real workspace.
+# Secrets are not exposed to pull requests from forks.
+
+on:
+  schedule:
+    - cron: "17 13 * * *" # daily, 13:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-acp-regression
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ACP_API_KEY: ${{ secrets.ACP_BENCH_API_KEY }}
+      ACP_BASE_URL: https://api.agenticcontrolplane.com
+      ACP_TENANT_SLUG: agentgovbench
+      BASELINE: results/acp_api-v0.1.0-live.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Check the key is configured
+        run: test -n "$ACP_API_KEY" || { echo "::error::ACP_BENCH_API_KEY secret is not set"; exit 1; }
+      - name: Run AgentGovBench (acp_api)
+        run: agentgovbench run --runner acp_api -v --out current.json
+      - name: Compare to baseline
+        id: compare
+        continue-on-error: true
+        run: python scripts/regression_check.py "$BASELINE" current.json
+      # Audit reads can lag under load; a regression must reproduce on a
+      # second full run before the job fails.
+      - name: Re-run on regression
+        if: steps.compare.outcome == 'failure'
+        run: |
+          agentgovbench run --runner acp_api -v --out current-retry.json
+          python scripts/regression_check.py "$BASELINE" current-retry.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentgovbench-results
+          path: current*.json
