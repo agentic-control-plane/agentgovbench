@@ -714,7 +714,10 @@ class Runner(StatefulRunner):
         entries: list[AuditEntry] = list(self._local_audit_entries)
         for real_tid, d in kept:
             data = d.to_dict() or {}
-            tool = data.get("tool") or ""
+            # The gateway files harness-native names under a canonical one
+            # (write_file -> Write, gsc #677) and keeps what the agent
+            # actually called in toolRaw. Scenarios assert on the called name.
+            tool = data.get("toolRaw") or data.get("tool") or ""
             if not tool:
                 continue
             real_uid = data.get("sub")
