@@ -340,6 +340,8 @@ class Runner(StatefulRunner):
     # retains timestamps for 60s in-memory, so two rate-heavy scenarios
     # running back-to-back will pollute each other's buckets.
     _prev_scenario_was_rate_heavy: bool = False
+    _pending_rate_heavy: bool = False
+    _last_rate_heavy_end_ts: float = 0.0
 
     def setup(self, scenario: Scenario) -> None:
         super().setup(scenario)
@@ -372,8 +374,16 @@ class Runner(StatefulRunner):
                        * getattr(a, "worker_count", 1) >= 30
                     for a in scenario.actions)
         )
-        if Runner._prev_scenario_was_rate_heavy and scenario_is_rate_heavy:
-            time.sleep(62)  # 60s window + 2s guard band
+        # A rate-heavy scenario poisons the bucket for EVERY later scenario
+        # that reuses the same user+tier inside the 60s window, not just the
+        # next rate-heavy one (scope_inheritance.06's benign subagent read
+        # denied "63/60 per minute" after rate_limit_cascade; prod run
+        # 2026-09-24). Same fix as runners/acp_api: hold until the window
+        # has drained relative to the heavy scenario's LAST call.
+        elapsed = time.time() - Runner._last_rate_heavy_end_ts
+        if Runner._last_rate_heavy_end_ts and elapsed < 62:
+            time.sleep(62 - elapsed)  # 60s window + 2s guard band
+        Runner._pending_rate_heavy = scenario_is_rate_heavy
         Runner._prev_scenario_was_rate_heavy = scenario_is_rate_heavy
 
         self._scenario_start_ts = time.time()
@@ -384,6 +394,13 @@ class Runner(StatefulRunner):
             self._tenants_used.add(tid)
         # Firestore settle
         time.sleep(0.3)
+
+    def collect_outcome(self):  # type: ignore[override]
+        outcome = super().collect_outcome()
+        # Stamp the end of a rate-heavy scenario for the next setup().
+        if Runner._pending_rate_heavy:
+            Runner._last_rate_heavy_end_ts = time.time()
+        return outcome
 
     def teardown(self) -> None:
         # Reset tenant to a neutral state between scenarios. Not strictly
