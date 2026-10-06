@@ -427,6 +427,14 @@ class Runner(AcpRunner):
         if r.status_code not in (401, 403):
             return
         from benchmark.runner import RunAborted
+        if r.status_code == 401:
+            raise RunAborted(
+                f"ACP did not accept ACP_API_KEY ({what} → 401: {r.text[:200]}).\n\n"
+                "The key is wrong, revoked, or expired — benchmark keys last "
+                "24 hours. Get a fresh one from the ACP console (API keys → "
+                "Create benchmark workspace) and check ACP_TENANT_SLUG matches "
+                "the workspace it shows."
+            )
         raise RunAborted(
             f"ACP refused the benchmark's policy fixture write "
             f"({what} → {r.status_code}: {r.text[:200]}).\n\n"
