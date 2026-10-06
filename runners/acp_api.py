@@ -416,6 +416,28 @@ class Runner(AcpRunner):
 
     # ── Policy write — via /admin endpoints ────────────────────────────
 
+    def _require_policy_write(self, r: "requests.Response", what: str) -> None:
+        """Abort the run when ACP refuses a policy fixture write.
+
+        Every scenario writes its own policy before it runs. If that write
+        is refused (401/403), the scenario runs against whatever policy the
+        workspace already had — usually allow-everything — and scores as a
+        plausible but meaningless result. That happened silently to real
+        users; refuse to produce a scorecard instead."""
+        if r.status_code not in (401, 403):
+            return
+        from benchmark.runner import RunAborted
+        raise RunAborted(
+            f"ACP refused the benchmark's policy fixture write "
+            f"({what} → {r.status_code}: {r.text[:200]}).\n\n"
+            "Each scenario writes its own policy before running; without "
+            "that write the results would not mean anything. ACP only "
+            "accepts these writes from a 24-hour AgentGovBench key on a "
+            "dedicated benchmark workspace — create one from the ACP "
+            "console (API keys → Create benchmark workspace) and use the "
+            "command it shows. See README → 'Reproducing the ACP score'."
+        )
+
     def _write_policy(self, tenant_id: str, policy: dict[str, Any]) -> None:
         """Write workspace + per-user policies via the admin REST API,
         or via Firestore Admin when AGB_POLICY_SETUP=firestore."""
@@ -442,6 +464,7 @@ class Runner(AcpRunner):
                 json=workspace_body,
                 timeout=10,
             )
+            self._require_policy_write(r, "workspacePolicy PUT")
             if not r.ok:
                 self._errors.append(f"workspacePolicy PUT {r.status_code}: {r.text[:200]}")
         except requests.RequestException as e:
@@ -461,6 +484,7 @@ class Runner(AcpRunner):
                     json=body,
                     timeout=10,
                 )
+                self._require_policy_write(r, f"userPolicies PUT {uid}")
                 if not r.ok:
                     self._errors.append(
                         f"userPolicies PUT {uid} {r.status_code}: {r.text[:200]}",
@@ -569,6 +593,7 @@ class Runner(AcpRunner):
                 json=body,
                 timeout=10,
             )
+            self._require_policy_write(r, f"apply_policy_change {real_uid}")
             if not r.ok:
                 self._errors.append(
                     f"apply_policy_change {real_uid} {r.status_code}: {r.text[:200]}",
@@ -935,14 +960,17 @@ class Runner(AcpRunner):
 
         base = f"{self._acp_base_url}/{self._tenant_slug}"
         # Workspace — clear any tools/defaults the prior scenario wrote.
+        # The first refusal surfaces here, before any scenario runs.
         try:
-            requests.delete(
+            r = requests.delete(
                 f"{base}/admin/workspacePolicy",
                 headers=self._admin_headers(),
                 timeout=10,
             )
         except requests.RequestException:
-            pass
+            r = None
+        if r is not None:
+            self._require_policy_write(r, "workspacePolicy DELETE")
 
         # Per-user — the set of uids the benchmark ever impersonates.
         # Kept in sync with UID_MAP in runners/acp.py.
