@@ -10,3 +10,4 @@ build/
 .DS_Store
 results/
 .env
+drivers/pi/node_modules/

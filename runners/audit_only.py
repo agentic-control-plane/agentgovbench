@@ -131,6 +131,7 @@ class Runner(StatefulRunner):
             decision="allow",
             reason="audit_only_allows_all",
             trace_id=str(uuid4()),
+            agent_tier=a.agent_tier,
             delegation_chain=chain,
             extra={"tier": a.agent_tier, "agent_name": a.agent_name,
                    "source": "framework_default"},

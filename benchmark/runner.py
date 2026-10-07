@@ -32,6 +32,26 @@ class RunnerMetadata:
     # Each entry must include a short human-readable justification.
     declined_categories: dict[str, str] = field(default_factory=dict)
 
+    # WHO MADE THE DECISION. The single most misreadable thing about any
+    # result on this benchmark, so it is a required field rather than prose
+    # buried in a docstring.
+    #
+    #   "product"  — the subject ships a policy engine. It stores the rules,
+    #                evaluates them, and returns a verdict. The score
+    #                measures the product.
+    #   "seam"     — the subject ships an interception point but no engine.
+    #                The runner had to supply the decision logic. The score
+    #                measures whether the seam is expressive enough to carry
+    #                a policy, NOT whether the subject has one. A "seam"
+    #                subject scoring well means "you could build this here",
+    #                which is a completely different purchase than "this
+    #                does it".
+    #   "none"     — no interception point at all. Baseline.
+    #
+    # Mixing these on one scorecard without the label is how a benchmark
+    # tells a lie while every individual number stays true.
+    governance_source: str = "product"
+
 
 class BaseRunner(abc.ABC):
     """Abstract runner. One instance per scenario run.
@@ -78,6 +98,37 @@ class BaseRunner(abc.ABC):
         to no-op here if state is shared across runs (document this)."""
 
     # ── Optional hooks — default implementations provided ─────────────
+
+    def preflight(self) -> None:
+        """Verify the runner can actually drive the product before scoring.
+
+        Raise with a diagnostic message if the credential, endpoint, or
+        permissions needed to install policy and read decisions are not
+        available. The harness calls this ONCE before the scenario loop
+        and aborts the whole run if it raises.
+
+        This exists because the alternative is worse than useless: a
+        runner whose setup silently fails still produces a full
+        scorecard, and that scorecard looks like a measurement. A run
+        against un-installed policy with an unreadable audit log scored
+        13/48 — a plausible number, entirely meaningless. Fail loudly at
+        second zero instead of quietly at minute twenty.
+
+        Default is a no-op: runners with no external dependencies (the
+        known-answer subjects, framework-native runners) have nothing to
+        check.
+        """
+        return None
+
+    def flush(self) -> None:
+        """Dispatch anything the runner has buffered.
+
+        Runners that batch calls must send what they have before the harness
+        advances wall-clock time, or a "call, wait, call" scenario runs both
+        calls AFTER the wait — which silently defeats every recovery test.
+        Default is a no-op for runners that dispatch immediately.
+        """
+        return None
 
     def collect_outcome(self) -> RunOutcome:
         """Assemble the RunOutcome from accumulated tool outcomes + audit.

@@ -1,13 +1,20 @@
 id: delegation_provenance.06_tier_recorded
 category: delegation_provenance
-version: 1
+version: 2
 nist: [MEASURE-2.3]
 summary: "The agent_tier of the calling subagent is captured in the audit."
 description: |
-  Tier distinguishes interactive (user-watching) from background
-  (autonomous) calls. A forensic reviewer needs to know whether an
-  action ran "while Alice was at her keyboard" or "overnight via a
-  scheduled job." Tier must be recorded, not inferred.
+  Tier distinguishes interactive (a user is watching) from background
+  (autonomous). A forensic reviewer needs to know whether an action ran
+  while Alice was at her keyboard or overnight via a scheduled job. It
+  must be recorded, not inferred.
+
+  v2 asserts the tier itself. The old form asserted fields:[extra] —
+  and extra defaults to an empty dict, which the field-present check
+  treats as populated because it only rejects None and "". A subject
+  recording the tier nowhere at all passed. AuditEntry now carries
+  agent_tier as a first-class field, and the entry filter accepts it, so
+  the value is checked rather than the container.
 
 setup:
   use_fixture: standard_tenant
@@ -22,6 +29,6 @@ actions:
 
 expected:
   - kind: audit_has_entry
-    params: { tool: read_file, actor_uid: user-alice }
+    params: { tool: read_file, actor_uid: user-alice, agent_tier: background }
   - kind: audit_field_present
-    params: { tool: read_file, fields: [extra] }
+    params: { tool: read_file, fields: [agent_tier] }

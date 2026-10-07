@@ -114,6 +114,10 @@ class ParallelFanOut:
     as_user: str = ""
     as_tenant: Optional[str] = None
     window_seconds: int = 60
+    # Tier the spawned workers run as. Without this a scenario cannot
+    # target a tier-specific limit, which is what several rate-limit
+    # scenarios claim to test.
+    agent_tier: Literal["interactive", "subagent", "background", "api"] = "subagent"
 
 
 @dataclass
@@ -140,7 +144,19 @@ class PolicyChange:
     set_rate_limit: Optional[int] = None
 
 
-Action = DirectToolCall | Delegation | ParallelFanOut | GatewayFailure | PolicyChange
+@dataclass
+class Wait:
+    """Advance wall-clock time before the next action.
+
+    Needed to test recovery: without it, a scenario cannot distinguish
+    "called during the outage" from "called after the gateway came back",
+    so a recovery assertion is satisfied by any system that always allows.
+    """
+    kind: Literal["wait"] = "wait"
+    seconds: float = 1.0
+
+
+Action = DirectToolCall | Delegation | ParallelFanOut | GatewayFailure | PolicyChange | Wait
 
 
 # ── Observed outcomes ──────────────────────────────────────────────────
@@ -158,6 +174,10 @@ class ToolOutcome:
     agent_tier: Optional[str] = None
     agent_name: Optional[str] = None
     latency_ms: Optional[float] = None
+    # Who decided this outcome. "product" means the decision was read back
+    # from the system under test. "harness" means the runner computed it.
+    # Only product-sourced evidence is scored; see scorer._product_evidence.
+    source: Literal["product", "harness"] = "product"
 
 
 @dataclass
@@ -172,10 +192,19 @@ class AuditEntry:
     decision: Literal["allow", "deny", "flag", "redact"]
     reason: Optional[str] = None
     trace_id: Optional[str] = None
+    # Which tier the call ran as. First-class because asserting on it via
+    # `extra` was unfalsifiable: extra defaults to {}, and the field-present
+    # check only rejects None and "", so `fields: [extra]` passed for a
+    # subject that recorded the tier nowhere at all.
+    agent_tier: Optional[str] = None
     # Provenance: the chain of agents through which this call flowed.
     delegation_chain: list[str] = field(default_factory=list)
     # Other fields the runner emitted — not asserted on, but available.
     extra: dict[str, Any] = field(default_factory=dict)
+    # Who produced this record. "product" means it was read back out of the
+    # system under test's own audit store. "harness" means the runner
+    # synthesized it. Only product-sourced entries are scored.
+    source: Literal["product", "harness"] = "product"
 
 
 @dataclass
@@ -218,6 +247,15 @@ class Scenario:
     summary: str = ""
     description: str = ""
     llm_required: bool = False
+    # A negative control asserts that a benign action is NOT interfered with.
+    # An ungoverned system passes it correctly, so it has no power to
+    # distinguish a governance product from no governance at all. Negative
+    # controls are still valuable (they catch over-blocking) but they are
+    # excluded from discrimination checks and reported separately.
+    #
+    # INVARIANT (enforced by tests/test_discrimination.py): the null runner
+    # must FAIL every scenario where this is False.
+    negative_control: bool = False
     setup: Setup = field(default_factory=Setup)
     actions: list[Action] = field(default_factory=list)
     expected: list[Assertion] = field(default_factory=list)

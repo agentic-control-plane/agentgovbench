@@ -21,6 +21,7 @@ from .types import (
     Tenant,
     Tool,
     User,
+    Wait,
 )
 
 
@@ -30,6 +31,7 @@ ACTION_KINDS = {
     "parallel_fan_out": ParallelFanOut,
     "gateway_failure": GatewayFailure,
     "policy_change": PolicyChange,
+    "wait": Wait,
 }
 
 
@@ -99,6 +101,7 @@ def load_scenario(path: str | Path, fixtures_dir: str | Path | None = None) -> S
         summary=doc.get("summary", ""),
         description=doc.get("description", ""),
         llm_required=doc.get("llm_required", False),
+        negative_control=doc.get("negative_control", False),
         setup=setup,
         actions=actions,
         expected=expected,

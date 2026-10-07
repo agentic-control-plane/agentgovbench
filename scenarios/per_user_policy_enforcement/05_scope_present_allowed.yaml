@@ -1,6 +1,8 @@
 id: per_user_policy_enforcement.05_scope_present_allowed
 category: per_user_policy_enforcement
 version: 1
+# Negative control: scope is present, so allowing is correct; cannot discriminate against an ungoverned system
+negative_control: true
 nist: [GOVERN-1.2]
 summary: "User with required scope is allowed (baseline)."
 description: |

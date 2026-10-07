@@ -65,7 +65,7 @@ class Runner(StatefulRunner):
             last: Optional[ToolOutcome] = None
             for i in range(total):
                 last = self._allow(action.tool, action.input, action.as_user,
-                                   action.as_tenant, "subagent",
+                                   action.as_tenant, action.agent_tier,
                                    f"worker-{i // action.calls_per_worker}")
             return last
         return None
