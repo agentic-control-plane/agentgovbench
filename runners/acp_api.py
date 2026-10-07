@@ -532,7 +532,7 @@ class Runner(AcpRunner):
                 f"{base}/admin/workspacePolicy",
                 headers=self._setup_headers(slug),
                 json=workspace_body,
-                timeout=10,
+                timeout=30,
             )
             self._require_policy_write(r, "workspacePolicy PUT")
             if not r.ok:
@@ -552,7 +552,7 @@ class Runner(AcpRunner):
                     f"{base}/admin/userPolicies/{uid}",
                     headers=self._setup_headers(slug),
                     json=body,
-                    timeout=10,
+                    timeout=30,
                 )
                 self._require_policy_write(r, f"userPolicies PUT {uid}")
                 if not r.ok:
@@ -612,7 +612,7 @@ class Runner(AcpRunner):
                 try:
                     cur = requests.get(
                         f"{base}/admin/workspacePolicy",
-                        headers=self._admin_headers(target_slug), timeout=10,
+                        headers=self._admin_headers(target_slug), timeout=30,
                     )
                     doc = (cur.json() or {}) if cur.ok else {}
                 except (requests.RequestException, ValueError) as e:
@@ -638,7 +638,7 @@ class Runner(AcpRunner):
                     r = requests.put(
                         f"{base}/admin/workspacePolicy",
                         headers=self._setup_headers(target_slug), json=body,
-                        timeout=10,
+                        timeout=30,
                     )
                     self._require_policy_write(r, "workspace policy_change PUT")
                     if not r.ok:
@@ -703,7 +703,7 @@ class Runner(AcpRunner):
                 f"{self._acp_base_url}/{self._tenant_slug}/admin/userPolicies/{real_uid}",
                 headers=self._setup_headers(),
                 json=body,
-                timeout=10,
+                timeout=30,
             )
             self._require_policy_write(r, f"apply_policy_change {real_uid}")
             if not r.ok:
@@ -802,7 +802,7 @@ class Runner(AcpRunner):
                     "X-GS-Client": "agentgovbench-acp-api/0.1.0",
                 },
                 json=body,
-                timeout=10,
+                timeout=30,
             )
         except requests.RequestException as e:
             self._errors.append(f"{path}: {e!r}")
@@ -868,7 +868,7 @@ class Runner(AcpRunner):
                     f"{self._acp_base_url}/{slug}/admin/audit",
                     params={"since": since_iso, "limit": 500},
                     headers=self._admin_headers(slug),
-                    timeout=15,
+                    timeout=30,
                 )
             except requests.RequestException as e:
                 self._errors.append(f"audit GET failed ({slug}): {e!r}")
@@ -1077,7 +1077,7 @@ class Runner(AcpRunner):
             r = requests.delete(
                 f"{base}/admin/workspacePolicy",
                 headers=self._admin_headers(),
-                timeout=10,
+                timeout=30,
             )
         except requests.RequestException:
             r = None
@@ -1091,7 +1091,7 @@ class Runner(AcpRunner):
                 requests.delete(
                     f"{base}/admin/userPolicies/{uid}",
                     headers=self._admin_headers(),
-                    timeout=10,
+                    timeout=30,
                 )
             except requests.RequestException:
                 pass
