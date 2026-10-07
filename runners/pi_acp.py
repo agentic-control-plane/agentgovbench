@@ -144,10 +144,11 @@ class Runner(PiRunner):
         and only caught because the per-scenario runner errors were read
         rather than the totals.
 
-        Policy installation deliberately runs as the human operator rather
-        than under an agent-held key: ACP refuses policy writes from an API
-        key on principle, and the benchmark honours that instead of routing
-        around it.
+        Policy installation here runs as the human operator (Firestore
+        fixture mode) rather than under the agent-held key. ACP refuses
+        policy writes from an API key on a real workspace on principle; the
+        `acp_api` runner uses a dedicated benchmark workspace's key for
+        that, but this composed runner is still pinned to firestore mode.
         """
         super().preflight()
         import os as _os
@@ -155,10 +156,10 @@ class Runner(PiRunner):
             raise RuntimeError(
                 "pi_acp cannot install scenario policy, so nothing it scored "
                 "would reflect the scenario. Set AGB_POLICY_SETUP=firestore "
-                "and run as the operator (ACP refuses policy writes from an "
-                "API key by design). Aborting rather than emitting a "
-                "plausible-looking scorecard measured against whatever "
-                "policy is already on the tenant."
+                "and run as the operator (this runner does not use the "
+                "benchmark-workspace key path that `acp_api` does). Aborting "
+                "rather than emitting a plausible-looking scorecard measured "
+                "against whatever policy is already on the tenant."
             )
         # Prove the path works now, not on the first scenario. A credential
         # that can read but not write policy fails here rather than after
