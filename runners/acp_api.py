@@ -10,10 +10,25 @@ Requirements on the API key:
   - Must be a `gsk_` key minted on the target ACP deployment.
   - Must have `bench.impersonate` and `admin.audit.read` scopes
     (or `*` for full reproducibility).
-  - The key's tenant must be the one the benchmark runs against.
+  - The key's tenant must be the one the benchmark runs against, and
+    that tenant must be a DEDICATED BENCHMARK WORKSPACE (Firestore
+    `isBenchmarkTenant: true`). ACP never lets an API key write the
+    policy of a real workspace — an agent's key must not be able to
+    loosen its own rules — but a `bench.impersonate` key on a benchmark
+    workspace MAY write workspacePolicy/userPolicies there. That is what
+    the console's "Create benchmark workspace" flow mints (24h key), and
+    what the pinned CI reference tenant `agentgovbench` uses. On any
+    other workspace the gateway answers `403 human-auth-required` and
+    the run aborts in preflight.
 
 Environment:
-  ACP_API_KEY       (required) Bearer token used for all endpoints.
+  ACP_API_KEY       (required) Bearer token used for all endpoints,
+                    including scenario policy setup on a benchmark
+                    workspace.
+  ACP_ADMIN_TOKEN   (optional) Firebase ID token of a signed-in human
+                    admin of the tenant. When set it is used INSTEAD of
+                    the API key for policy setup — the only way to drive
+                    a tenant that is not a benchmark workspace.
   ACP_BASE_URL      (optional) Default https://api.agenticcontrolplane.com
   ACP_TENANT_SLUG   (optional) Target tenant slug. Defaults to `agentgovbench`.
   AGB_POLICY_SETUP  (optional) `firestore` routes scenario policy FIXTURE
@@ -232,9 +247,6 @@ class Runner(AcpRunner):
         # Checking readability was the original mistake here — it passed,
         # and the run that followed was worthless.
         #
-        # The probe writes back the document we just read, so it is a
-        # no-op on success.
-        #
         # Skipped in firestore fixture-setup mode: there the operator's own
         # credentials install policy directly and the API is never asked to
         # mutate it, which is the whole point of that mode. Probing the HTTP
@@ -246,54 +258,96 @@ class Runner(AcpRunner):
                     "initialise — check ADC and the tenant slug."
                 )
         else:
-            try:
-                cur = requests.get(
-                    f"{base}/admin/workspacePolicy",
-                    headers=self._admin_headers(), timeout=20,
-                )
-                if cur.ok:
-                    doc = cur.json() or {}
-                    echo = {
-                        "mode": doc.get("mode", "enforce"),
-                        "defaults": doc.get("defaults", {}),
-                        "tools": doc.get("tools", {}),
-                    }
-                    w = requests.put(
-                        f"{base}/admin/workspacePolicy",
-                        headers=self._setup_headers(), json=echo, timeout=20,
-                    )
-                    if w.status_code >= 400:
-                        problems.append(
-                            f"policy WRITE -> HTTP {w.status_code} {w.text[:200]}"
-                        )
-            except Exception as e:
-                problems.append(f"policy write probe failed: {e!r}")
+            problems.extend(self._probe_policy_write(base))
         if problems:
             raise RuntimeError(
-                "ACP_API_KEY cannot drive this deployment:\n  - "
+                f"{self._setup_credential_label()} cannot drive this deployment:\n  - "
                 + "\n  - ".join(problems)
                 + f"\n\nTenant slug: {self._tenant_slug}. Base: {self._acp_base_url}."
                 "\n\nReading the status code:"
                 "\n  401 'Invalid or revoked API key' -> the key itself is not "
-                "valid. These keys are capped at 24h expiry, so an expired key "
+                "valid. Benchmark keys expire after 24h, so an expired key "
                 "is the most common cause. Mint a new one."
                 "\n  403 'api key lacks <scope>'       -> the key is valid but "
                 "under-scoped. Re-mint with bench.impersonate and "
                 "admin.audit.read (or *)."
-                "\n  403 'human-auth-required'         -> NOT fixable with any "
-                "key. ACP forbids API keys from writing governance policy on "
+                f"\n  403 '{self.HUMAN_AUTH_REQUIRED}'         -> the key is valid "
+                "but this tenant is not a benchmark workspace. ACP forbids API "
+                "keys from writing governance policy on a real workspace on "
                 "principle: an agent must never be able to loosen the rules it "
-                "runs under. Since every scenario's setup installs policy, this "
-                "runner cannot drive a live deployment at all — the "
-                "'reproduce it with one env var' story in the README does not "
-                "work. Use a signed-in admin session, or the Firebase-backed "
-                "`acp` runner, and note in the results that the latter writes "
-                "Firestore directly and therefore BYPASSES this control rather "
-                "than satisfying it."
-                "\n\nThe dashboard issues empty-scope keys by default; use the "
-                "'AgentGovBench testing (24h, impersonation)' preset on the API "
-                "Keys page, which pre-fills both scopes."
+                "runs under. The exception is a dedicated benchmark workspace "
+                "(isBenchmarkTenant), where a bench.impersonate key may write "
+                "policy. See README -> 'Reproducing the ACP score' -> "
+                "'Create benchmark workspace'. Alternatively export "
+                "ACP_ADMIN_TOKEN (a signed-in admin's Firebase ID token) and "
+                "the runner will use it for policy setup only."
+                "\n\nThe dashboard issues empty-scope keys by default; the "
+                "'Create benchmark workspace' card mints a correctly scoped "
+                "key on a workspace that accepts these writes."
             )
+
+    # Gateway's refusal marker for "no API key may do this; a human must".
+    HUMAN_AUTH_REQUIRED = "human-auth-required"
+
+    def _setup_credential_label(self) -> str:
+        return "ACP_ADMIN_TOKEN" if self._admin_token else "ACP_API_KEY"
+
+    def _probe_policy_write(self, base: str) -> list[str]:
+        """Really try a policy write with the setup credential.
+
+        Reads the workspace policy with the agent key, then PUTs the same
+        document back with the setup credential (the API key, or
+        ACP_ADMIN_TOKEN when set). On success the write is a no-op — the
+        tenant ends the probe carrying exactly what it started with — but
+        the gateway has had to actually authorise a policy mutation, which
+        is the operation every scenario's setup depends on.
+
+        A `403 human-auth-required` with no ACP_ADMIN_TOKEN means the key is
+        fine but the tenant is not a benchmark workspace; that is reported
+        with the way out rather than as a generic write failure.
+        """
+        try:
+            cur = requests.get(
+                f"{base}/admin/workspacePolicy",
+                headers=self._admin_headers(), timeout=20,
+            )
+        except Exception as e:
+            return [f"policy write probe: read-back failed ({e!r})"]
+        if not cur.ok:
+            # Already reported by the read loop above.
+            return []
+        try:
+            doc = cur.json() or {}
+        except ValueError:
+            doc = {}
+        echo = {
+            "mode": doc.get("mode", "enforce"),
+            "defaults": doc.get("defaults", {}),
+            "tools": doc.get("tools", {}),
+        }
+        try:
+            w = requests.put(
+                f"{base}/admin/workspacePolicy",
+                headers=self._setup_headers(), json=echo, timeout=20,
+            )
+        except Exception as e:
+            return [f"policy write probe failed: {e!r}"]
+        if w.status_code < 400:
+            return []
+        if (w.status_code == 403 and self.HUMAN_AUTH_REQUIRED in (w.text or "")
+                and not self._admin_token):
+            return [
+                f"policy WRITE with ACP_API_KEY -> HTTP 403 "
+                f"{self.HUMAN_AUTH_REQUIRED}: tenant '{self._tenant_slug}' is "
+                "not a benchmark workspace, so no API key may write its "
+                "policy. Create one (ACP console -> API Keys -> Create "
+                "benchmark workspace) and point ACP_TENANT_SLUG at it, or "
+                "export ACP_ADMIN_TOKEN for a signed-in admin of this tenant."
+            ]
+        return [
+            f"policy WRITE with {self._setup_credential_label()} -> "
+            f"HTTP {w.status_code} {w.text[:200]}"
+        ]
 
     @property
     def metadata(self) -> RunnerMetadata:
@@ -348,8 +402,9 @@ class Runner(AcpRunner):
     def _admin_headers(self, slug: Optional[str] = None) -> dict[str, str]:
         """Agent credential for `slug` (default: the primary tenant).
 
-        This is the principal whose behaviour is being measured, and it is
-        deliberately NOT able to write policy — see _setup_headers.
+        This is the principal whose behaviour is being measured. On a real
+        workspace it cannot write policy; on a benchmark workspace the
+        gateway lets it — see _setup_headers.
         """
         return {
             "Authorization": f"Bearer {self._key_for(slug or self._tenant_slug)}",
@@ -357,33 +412,37 @@ class Runner(AcpRunner):
             "X-GS-Client": "agentgovbench-acp-api/0.1.0",
         }
 
-    def _setup_headers(self) -> dict[str, str]:
-        """Human credential. Installs scenario policy, and nothing else.
+    def _setup_headers(self, slug: Optional[str] = None) -> dict[str, str]:
+        """Credential that installs scenario policy in `slug` (default: primary).
 
-        ACP refuses policy writes from API-key principals on principle: an
-        agent must never be able to loosen the rules it runs under. That
-        is the property under test, so the benchmark honours it rather
-        than routing around it — setup authenticates as a signed-in admin,
-        the exercise authenticates as an agent, and the two credentials
-        are never interchanged.
+        ACP refuses policy writes from API-key principals on a real
+        workspace on principle: an agent must never be able to loosen the
+        rules it runs under. The benchmark honours that rather than routing
+        around it — it runs in a DEDICATED BENCHMARK WORKSPACE
+        (`isBenchmarkTenant`), the one place the gateway lets a
+        `bench.impersonate` key write workspacePolicy/userPolicies. That is
+        what the console's "Create benchmark workspace" card mints (24h
+        key) and what the pinned CI reference tenant `agentgovbench` uses.
+        So by default setup uses the same API key as the exercise, and the
+        gateway's own tenant check — not this runner — decides whether the
+        write is legitimate. Preflight proves it before anything is scored;
+        a refusal mid-run aborts via _require_policy_write.
 
-        ACP_ADMIN_TOKEN is a short-lived Firebase ID token belonging to a
-        human who is an admin/owner of the benchmark tenant. Obtain it
-        from a browser session you actually signed in to; do not mint one
-        with a service account, which would re-introduce exactly the
-        bypass this split exists to avoid.
+        ACP_ADMIN_TOKEN, when set, is used instead: a short-lived Firebase
+        ID token belonging to a human admin/owner of the tenant. It is the
+        only way to drive a tenant that is not a benchmark workspace.
+        Obtain it from a browser session you actually signed in to; do not
+        mint one with a service account, which would re-introduce exactly
+        the bypass the benchmark-workspace split exists to avoid.
         """
-        if not self._admin_token:
-            raise RuntimeError(
-                "ACP_ADMIN_TOKEN not set — cannot install scenario policy.\n"
-                "This runner deliberately cannot write policy with its API "
-                "key; ACP forbids it, and that prohibition is one of the "
-                "things the benchmark measures.\n"
-                "Export a Firebase ID token for a signed-in admin of tenant "
-                f"'{self._tenant_slug}'. See docs/reproducing.md."
-            )
+        if self._admin_token:
+            return {
+                "Authorization": f"Bearer {self._admin_token}",
+                "Content-Type": "application/json",
+                "X-GS-Client": "agentgovbench-acp-api-setup/0.1.0",
+            }
         return {
-            "Authorization": f"Bearer {self._admin_token}",
+            "Authorization": f"Bearer {self._key_for(slug or self._tenant_slug)}",
             "Content-Type": "application/json",
             "X-GS-Client": "agentgovbench-acp-api-setup/0.1.0",
         }
@@ -443,7 +502,10 @@ class Runner(AcpRunner):
             "accepts these writes from a 24-hour AgentGovBench key on a "
             "dedicated benchmark workspace — create one from the ACP "
             "console (API keys → Create benchmark workspace) and use the "
-            "command it shows. See README → 'Reproducing the ACP score'."
+            "command it shows. See README → 'Reproducing the ACP score'. "
+            "To drive a tenant that is not a benchmark workspace, export "
+            "ACP_ADMIN_TOKEN (a signed-in admin's Firebase ID token) for "
+            "policy setup."
         )
 
     def _write_policy(self, tenant_id: str, policy: dict[str, Any]) -> None:
@@ -468,7 +530,7 @@ class Runner(AcpRunner):
         try:
             r = requests.put(
                 f"{base}/admin/workspacePolicy",
-                headers=self._setup_headers(),
+                headers=self._setup_headers(slug),
                 json=workspace_body,
                 timeout=10,
             )
@@ -488,7 +550,7 @@ class Runner(AcpRunner):
             try:
                 r = requests.put(
                     f"{base}/admin/userPolicies/{uid}",
-                    headers=self._setup_headers(),
+                    headers=self._setup_headers(slug),
                     json=body,
                     timeout=10,
                 )
@@ -542,9 +604,51 @@ class Runner(AcpRunner):
         if not pc.user:
             target_slug = self._slug_for(pc.tenant)
             if not self._fs_setup:
-                self._errors.append(
-                    "workspace-scoped policy_change needs firestore setup "
-                    "mode (policy writes over the API are human-only)")
+                # Same read-merge-write as the Firestore branch below, over
+                # the admin REST API with the setup credential (benchmark
+                # workspace key, or ACP_ADMIN_TOKEN). A refusal aborts the
+                # run rather than leaving the deny uninstalled.
+                base = f"{self._acp_base_url}/{target_slug}"
+                try:
+                    cur = requests.get(
+                        f"{base}/admin/workspacePolicy",
+                        headers=self._admin_headers(target_slug), timeout=10,
+                    )
+                    doc = (cur.json() or {}) if cur.ok else {}
+                except (requests.RequestException, ValueError) as e:
+                    self._errors.append(
+                        f"workspace policy_change read failed: {e!r}")
+                    return
+                body = {
+                    "mode": doc.get("mode", "enforce"),
+                    "defaults": dict(doc.get("defaults", {})),
+                    "tools": dict(doc.get("tools", {})),
+                }
+                if pc.tool:
+                    per_tool = dict(body["tools"].get(pc.tool, {}))
+                    merged = dict(per_tool.get(tier, {}))
+                    merged.update(entry)
+                    per_tool[tier] = merged
+                    body["tools"][pc.tool] = per_tool
+                else:
+                    merged = dict(body["defaults"].get(tier, {}))
+                    merged.update(entry)
+                    body["defaults"][tier] = merged
+                try:
+                    r = requests.put(
+                        f"{base}/admin/workspacePolicy",
+                        headers=self._setup_headers(target_slug), json=body,
+                        timeout=10,
+                    )
+                    self._require_policy_write(r, "workspace policy_change PUT")
+                    if not r.ok:
+                        self._errors.append(
+                            f"workspace policy_change PUT {r.status_code}: "
+                            f"{r.text[:200]}")
+                except requests.RequestException as e:
+                    self._errors.append(
+                        f"workspace policy_change PUT failed: {e!r}")
+                time.sleep(1.5)  # replica lag before the next governance call
                 return
             from firebase_admin import firestore as fb_firestore
 

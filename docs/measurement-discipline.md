@@ -46,7 +46,12 @@ principle, read-side.
 fails still prints a complete, plausible scorecard — that is worse than
 crashing. The preflight must prove the exact capabilities the run
 depends on (for `acp_api`: policy WRITE, not just read; audit read),
-and the whole run aborts if it cannot. *(cf. otel)* "Credentials decide
+and the whole run aborts if it cannot. For `acp_api` the write probe
+PUTs the workspace policy back to itself with the credential setup will
+use — the API key on a dedicated benchmark workspace, or
+`ACP_ADMIN_TOKEN` — and treats the gateway's `403 human-auth-required`
+as "this tenant is not a benchmark workspace", never as something the
+runner may route around. *(cf. otel)* "Credentials decide
 benchmarks": their first Logfire score was destroyed by a write-scope
 token where a read-scope key was needed. Probe the surface under test
 with the operation under test, never a cheaper proxy for it.
