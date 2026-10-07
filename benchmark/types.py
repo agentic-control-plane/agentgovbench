@@ -283,3 +283,11 @@ class ScenarioResult:
     outcome: Optional[RunOutcome] = None
     wall_time_ms: float = 0.0
     nist_controls: list[str] = field(default_factory=list)
+    # "pass" | "fail" | "na". N/A means THE RUNNER cannot exercise the
+    # scenario (it lacks a capability the scenario's actions need, e.g. it
+    # cannot take the gateway offline, or it only holds one tenant's
+    # credential). An N/A scenario was never executed and leaves both the
+    # numerator and the denominator: the runner must not change the score.
+    # A product that lacks the behaviour still FAILS — see SCORING.md §4.
+    status: str = "pass"
+    na_reason: Optional[str] = None

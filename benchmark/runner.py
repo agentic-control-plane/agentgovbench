@@ -52,6 +52,21 @@ class RunnerMetadata:
     # tells a lie while every individual number stays true.
     governance_source: str = "product"
 
+    # WHAT THE ADAPTER CAN PHYSICALLY DO. Distinct from declined_categories
+    # (a statement about the product) — this is a statement about the
+    # runner. A scenario whose actions need a capability the runner
+    # declares False is reported N/A for this runner and never executed,
+    # so it leaves both the numerator and the denominator. Anything not
+    # declared is assumed available. Known keys (see scorer.required_capabilities):
+    #   simulate_outage  — the runner can make the governance layer
+    #                      unreachable / return 5xx for real. A runner that
+    #                      fakes the outage client-side is deciding the
+    #                      outcome itself, which the scorer strips anyway.
+    #   multi_tenant     — the runner holds credentials for two separate
+    #                      tenants, so cross-tenant scenarios act in two
+    #                      real tenants rather than collapsing onto one.
+    capabilities: dict[str, bool] = field(default_factory=dict)
+
 
 class BaseRunner(abc.ABC):
     """Abstract runner. One instance per scenario run.

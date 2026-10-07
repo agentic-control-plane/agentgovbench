@@ -311,6 +311,65 @@ def is_declined(scenario_id: str, category: str, declined: dict[str, str] | None
     return False
 
 
+# ── Runner capabilities → N/A ──────────────────────────────────────────
+#
+# The runner must not change the score. The same product driven through
+# two adapters must land on the same number, so a scenario an adapter
+# physically cannot exercise is N/A for that adapter: never run, never
+# passed, never failed, out of both numerator and denominator. The
+# alternative — letting the adapter fake the missing step — is the
+# adapter scoring itself (see _product_evidence above).
+
+
+def required_capabilities(scenario: Scenario) -> dict[str, str]:
+    """Capabilities a scenario's actions need, keyed by capability name
+    with a human-readable reason. Derived from the scenario, not declared
+    in it, so a scenario author cannot forget to tag one."""
+    from .types import GatewayFailure
+    needs: dict[str, str] = {}
+    if any(isinstance(a, GatewayFailure) for a in scenario.actions):
+        needs["simulate_outage"] = (
+            "scenario takes the governance layer offline (gateway_failure); "
+            "this runner cannot induce a real outage"
+        )
+    if len(scenario.setup.tenants) > 1:
+        needs["multi_tenant"] = (
+            f"scenario acts in {len(scenario.setup.tenants)} tenants; this "
+            "runner holds one tenant's credential, so both would collapse "
+            "onto one real tenant"
+        )
+    return needs
+
+
+def not_applicable_reason(scenario: Scenario, capabilities: dict[str, bool] | None) -> str | None:
+    """The reason this scenario is N/A for a runner with ``capabilities``,
+    or None when the runner can exercise it. Undeclared capabilities are
+    assumed available — only an explicit False opts out."""
+    caps = capabilities or {}
+    missing = [
+        reason for cap, reason in required_capabilities(scenario).items()
+        if caps.get(cap, True) is False
+    ]
+    return "; ".join(missing) if missing else None
+
+
+def na_result(scenario: Scenario, runner_name: str, reason: str) -> ScenarioResult:
+    """A ScenarioResult for a scenario this runner did not execute."""
+    return ScenarioResult(
+        scenario_id=scenario.id,
+        scenario_version=scenario.version,
+        category=scenario.category,
+        runner=runner_name,
+        passed=False,
+        assertion_results=[],
+        outcome=None,
+        wall_time_ms=0.0,
+        nist_controls=list(scenario.nist),
+        status="na",
+        na_reason=reason,
+    )
+
+
 def aggregate(
     results: list[ScenarioResult],
     declined: dict[str, str] | None = None,
@@ -325,15 +384,28 @@ def aggregate(
 
     They are counted separately rather than dropped silently, so a reader
     can see how much of the library a subject did not face.
+
+    Runner N/A (status == "na") leaves the denominator the same way, and
+    is reported separately from declinations: declined is "the product
+    does not do this", N/A is "this adapter could not try".
     """
     from collections import defaultdict
-    cats: dict[str, dict[str, int]] = defaultdict(lambda: {"passed": 0, "total": 0})
+    cats: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"passed": 0, "total": 0, "na": 0, "declined": 0})
     n_declined = 0
     declined_ids: list[str] = []
+    n_na = 0
+    na_ids: list[str] = []
     for r in results:
+        if r.status == "na":
+            n_na += 1
+            na_ids.append(r.scenario_id)
+            cats[r.category]["na"] += 1
+            continue
         if is_declined(r.scenario_id, r.category, declined):
             n_declined += 1
             declined_ids.append(r.scenario_id)
+            cats[r.category]["declined"] += 1
             continue
         cats[r.category]["total"] += 1
         if r.passed:
@@ -344,6 +416,8 @@ def aggregate(
             "passed": v["passed"],
             "total": v["total"],
             "pass_rate": v["passed"] / v["total"] if v["total"] else 0.0,
+            "na": v["na"],
+            "declined": v["declined"],
         }
         for cat, v in sorted(cats.items())
     ]
@@ -353,4 +427,6 @@ def aggregate(
         "total_passed": sum(v["passed"] for v in cats.values()),
         "declined_scenarios": n_declined,
         "declined_ids": sorted(declined_ids),
+        "na_scenarios": n_na,
+        "na_ids": sorted(na_ids),
     }

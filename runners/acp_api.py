@@ -370,30 +370,27 @@ class Runner(AcpRunner):
                     "on subagents; parent's effective scope flows to "
                     "children. Product roadmap item."
                 ),
-                "per_user_policy_enforcement.03_user_override_beats_workspace": (
-                    "Tests user-scope tool-specific overrides; harness + "
-                    "runner need types/YAML/write-path support for "
-                    "user.tools. Gateway side is ready."
-                ),
-                # Cross-tenant isolation is only declinable while this
-                # runner has one tenant to act in. With ACP_API_KEY_B set,
-                # both scenario tenants map to real, separate tenants and
-                # these become genuine measurements — so the declination
-                # disappears rather than quietly excusing a category the
-                # runner could now test.
-                **({} if self._multi else {
-                    "cross_tenant_isolation.02_audit_log_separation": (
-                        "Requires two tenants to test separation; this run "
-                        "has one API key, so both scenario tenants collapse "
-                        "onto it. Set ACP_API_KEY_B to measure this."
-                    ),
-                    "cross_tenant_isolation.03_user_scope_does_not_leak": (
-                        "Single-tenant run — set ACP_API_KEY_B to measure."
-                    ),
-                    "cross_tenant_isolation.05_admin_cannot_cross": (
-                        "Single-tenant run — set ACP_API_KEY_B to measure."
-                    ),
-                }),
+            },
+            # What this adapter can physically do — distinct from
+            # declined_categories, which is a statement about the product.
+            # A False here makes every scenario needing that capability N/A
+            # for this runner: not run, not scored, visible in the
+            # scorecard as "N/A for runner acp_api".
+            capabilities={
+                # Hosted gateway; this adapter cannot take it offline. The
+                # inherited client-side outage simulation decides the
+                # outcome itself and is stripped by the scorer, so the
+                # fail_mode_discipline outage scenarios could only ever fail
+                # here — which measured the adapter, not the product.
+                "simulate_outage": False,
+                # gsk_ keys are tenant-scoped. With ACP_API_KEY_B set both
+                # scenario tenants map to real, separate tenants and the
+                # cross-tenant scenarios become genuine measurements; with
+                # one key they collapse onto one tenant, where a correct
+                # deployment is indistinguishable from a leaking one (and a
+                # tenant-a deny IS a tenant-b deny — cross_tenant_isolation.01
+                # read that as a leak).
+                "multi_tenant": self._multi,
             },
         )
 
@@ -741,17 +738,6 @@ class Runner(AcpRunner):
         home = getattr(self, "_home_slug_by_user", {}).get(uid, self._current_slug)
         return self._key_for(home)
 
-    def execute_action(self, action: Action) -> Optional[ToolOutcome]:  # type: ignore[override]
-        # Skip scenarios in declined_categories — we can't test them
-        # honestly, and executing their actions pollutes audit (e.g.
-        # two-tenant scenarios collapsed onto one tenant). Declined
-        # scenarios return empty audit, which vacuously passes
-        # no_cross_tenant_leak and fails any positive assertion with
-        # an honest "couldn't run" signal.
-        if getattr(self, "_skip_scenario", False):
-            return None
-        return super().execute_action(action)
-
     def _post_govern(
         self,
         path: str,
@@ -834,11 +820,6 @@ class Runner(AcpRunner):
 
     def audit_log(self) -> list[AuditEntry]:
         if not self._scenario_start_ts:
-            return []
-        # Declined scenarios didn't execute — no audit to look up, and
-        # reading the tenant-wide log window could surface unrelated
-        # entries that look like leaks on no_cross_tenant_leak checks.
-        if getattr(self, "_skip_scenario", False):
             return []
         # Gateway writes audit async; sleep briefly so GET /admin/audit
         # reflects the scenario's recent calls.
@@ -1003,21 +984,9 @@ class Runner(AcpRunner):
 
         self._scenario_start_ts = time.time()
 
-        # Only ONE scenario needs early-skip: cross_tenant_isolation.02
-        # collapses two tenants onto the runner's single tenant and
-        # registers false cross-tenant leaks. Other declined scenarios
-        # still run — their assertions happen to pass on a single
-        # tenant or just get counted as documented declinations in the
-        # scorecard. Skipping them breaks positive assertions that
-        # require outcomes.
-        # Only skipped while single-tenant, where both scenario tenants
-        # collapse onto one real one and every entry reads as a leak. With
-        # a second key the scenario is genuinely measurable, so run it.
-        self._skip_scenario = (
-            not self._multi
-            and scenario.id == "cross_tenant_isolation.02_audit_log_separation"
-        )
-
+        # Two-tenant scenarios are N/A for this runner while it holds one
+        # key (metadata.capabilities["multi_tenant"]); the harness never
+        # calls setup() for them, so no per-scenario skip is needed here.
         self.setup_policy_only(scenario)
 
     def setup_policy_only(self, scenario) -> None:

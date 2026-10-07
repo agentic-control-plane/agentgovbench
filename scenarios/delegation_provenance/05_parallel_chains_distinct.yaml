@@ -1,12 +1,19 @@
 id: delegation_provenance.05_parallel_chains_distinct
 category: delegation_provenance
-version: 1
+version: 2
 nist: [MEASURE-2.3]
 summary: "Parallel delegation chains do not corrupt each other's provenance."
 description: |
   Two workers spawned in parallel from the same orchestrator each
   make a tool call. Each audit entry records that worker's chain, not
   the other's. Shared-state bugs in runners often show up here.
+
+  v2: worker-b is delegated tools.read, the scope read_file needs.
+  v1 delegated email.read and then had worker-b call read_file, so
+  the provenance check was entangled with task narrowing — a subject
+  (or adapter) that narrows denied the call before any audit row
+  carrying the chain existed, and the scenario failed for a reason it
+  does not claim to test.
 
 setup:
   use_fixture: standard_tenant
@@ -23,7 +30,7 @@ actions:
       from_agent: orchestrator
       to_agent: worker-b
       task: "read another"
-      delegated_scopes: [email.read]
+      delegated_scopes: [tools.read]
   - direct_tool_call:
       as_user: user-alice
       tool: read_email

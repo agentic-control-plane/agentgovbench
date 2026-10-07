@@ -21,7 +21,7 @@ import click
 from . import SCENARIO_LIBRARY_VERSION, SPEC_VERSION
 from .loader import load_all
 from .runner import BaseRunner, RunAborted
-from .scorer import aggregate, score_scenario
+from .scorer import aggregate, na_result, not_applicable_reason, score_scenario
 from .types import ScenarioResult
 
 
@@ -80,6 +80,10 @@ def _result_to_dict(r: ScenarioResult, include_outcome: bool = False) -> dict:
         "category": r.category,
         "runner": r.runner,
         "passed": r.passed,
+        # "pass" | "fail" | "na". N/A = this runner could not exercise the
+        # scenario; it was not run and is outside the score either way.
+        "status": r.status,
+        "na_reason": r.na_reason,
         "nist_controls": r.nist_controls,
         "wall_time_ms": r.wall_time_ms,
         "assertions": [
@@ -180,8 +184,21 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
         sys.exit(2)
 
     results: list[ScenarioResult] = []
+    capabilities = getattr(runner_inst.metadata, "capabilities", None) or {}
     for i, scn in enumerate(scenarios, 1):
         t0 = time.time()
+        # A scenario this adapter cannot exercise is N/A for this adapter:
+        # not run, not scored, not a pass or a fail. Running it anyway would
+        # either fail the product for the adapter's limitation or let the
+        # adapter fake the missing step — the runner must not change the
+        # score either way.
+        na_reason = not_applicable_reason(scn, capabilities)
+        if na_reason:
+            results.append(na_result(scn, runner_inst.metadata.name, na_reason))
+            if verbose:
+                click.echo(f"[{i}/{len(scenarios)}] – {scn.id}  N/A for runner "
+                           f"{runner_inst.metadata.name}: {na_reason}")
+            continue
         try:
             runner_inst.setup(scn)
             for action in scn.actions:
@@ -221,6 +238,7 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 outcome=None,
                 wall_time_ms=(time.time() - t0) * 1000,
                 nist_controls=list(scn.nist),
+                status="fail",
             ))
             continue
         finally:
@@ -230,6 +248,7 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 pass
         wall = (time.time() - t0) * 1000
         res = score_scenario(scn, outcome, runner_inst.metadata.name, wall)
+        res.status = "pass" if res.passed else "fail"
         results.append(res)
         status = "✓" if res.passed else "✗"
         if verbose or not res.passed:
@@ -254,6 +273,7 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                 "vendor": runner_inst.metadata.vendor,
                 "notes": runner_inst.metadata.notes,
                 "declined_categories": runner_inst.metadata.declined_categories,
+                "capabilities": capabilities,
             },
             "aggregate": agg,
             # Runner-side failures, deduplicated with counts. Persisted at
@@ -281,17 +301,37 @@ def _print_scorecard(runner_inst: BaseRunner, agg: dict, results: list[ScenarioR
     _echo_governance_source(getattr(meta, "governance_source", "product"))
     click.echo("=" * 70)
     click.echo()
-    click.echo(f"{'Category':<36} {'Pass':>6} {'Rate':>8}")
-    click.echo("-" * 56)
+    click.echo(f"{'Category':<36} {'Pass':>6} {'Rate':>8}  {'N/A':>4} {'Decl':>4}")
+    click.echo("-" * 64)
     for row in agg["by_category"]:
         rate = f"{row['pass_rate'] * 100:.0f}%"
-        click.echo(f"{row['category']:<36} {row['passed']:>3}/{row['total']:<2} {rate:>8}")
-    click.echo("-" * 56)
-    click.echo(f"{'total':<36} {agg['total_passed']:>3}/{agg['total_scenarios']:<2}")
+        na = row.get("na", 0) or ""
+        decl = row.get("declined", 0) or ""
+        click.echo(f"{row['category']:<36} {row['passed']:>3}/{row['total']:<2} {rate:>8}  "
+                   f"{na!s:>4} {decl!s:>4}")
+    click.echo("-" * 64)
+    click.echo(f"{'total':<36} {agg['total_passed']:>3}/{agg['total_scenarios']:<2}"
+               + format_score_suffix(agg, meta.name))
+    na_by_id = {r.scenario_id: r.na_reason for r in results if r.status == "na"}
+    for sid in agg.get("na_ids", []):
+        click.echo(f"  ({sid}: N/A for runner {meta.name} — {na_by_id.get(sid)})")
     for cat, reason in (meta.declined_categories or {}).items():
-        click.echo(f"  ({cat}: N/A — {reason})")
+        click.echo(f"  ({cat}: declined — {reason})")
 
     _print_runner_errors(results)
+
+
+def format_score_suffix(agg: dict, runner_name: str) -> str:
+    """' (Z N/A for runner R, W declined)' — empty when neither applies.
+
+    Shown next to every X/Y so a score can never be read without the size
+    of the library the runner did not face."""
+    parts = []
+    if agg.get("na_scenarios"):
+        parts.append(f"{agg['na_scenarios']} N/A for runner {runner_name}")
+    if agg.get("declined_scenarios"):
+        parts.append(f"{agg['declined_scenarios']} declined")
+    return f"  ({', '.join(parts)})" if parts else ""
 
 
 def _runner_error_tally(results: list[ScenarioResult]) -> dict:
