@@ -66,23 +66,28 @@ agentgovbench run --runner vanilla
 
 Expected: **13/48** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
 
-### 2. Reproduce the ACP scorecard (zero Firebase, ~5 minutes)
+### 2. Reproducing the ACP score (zero Firebase, ~5 minutes)
 
-Hits a live ACP deployment using only an API key. No Firebase Admin SDK, no service-account JSON. You'll need a `gsk_` API key minted on the target ACP deployment with `bench.impersonate` and `admin.audit.read` scopes.
+Hits a live ACP deployment using only an API key — no Firebase Admin SDK, no service-account JSON.
 
-> **Mint the key with the right scopes.** The ACP dashboard issues empty-scope keys by default. Use the **"AgentGovBench testing (24h, impersonation)"** preset on the API Keys page — it pre-fills the right scopes and hard-caps expiry to 24h. If you mint a key without the preset, leave the scopes field blank or pass `*`; an explicitly-narrow key without the bench scopes will silently fail audit-related scenarios with messages like `0 matching audit entries`.
+Every scenario writes its own policy before it runs, and the runner clears policy between scenarios. ACP never lets an API key change the policy of a real workspace (an agent's key must not be able to loosen its own rules), so the benchmark runs in a **separate benchmark workspace** with a short-lived key that may write policy only there:
+
+1. Sign in to the [ACP console](https://cloud.agenticcontrolplane.com) as a workspace owner or admin → **API Keys** → in the **Reproduce our AgentGovBench score** card, click **Create benchmark workspace**. (An API key can't do this step — it has to be a signed-in human.)
+2. It creates a workspace named `<yourslug>-agb`, shows a key once (expires in 24 hours), and prints the command. Copy and run it:
 
 ```bash
-pip install -e '.[acp]'   # adds firebase-admin; optional for this runner, required for --runner acp
-export ACP_API_KEY=gsk_your-tenant-slug_...
-export ACP_BASE_URL=https://api.agenticcontrolplane.com   # or your deployment
-export ACP_TENANT_SLUG=your-tenant-slug
+git clone https://github.com/agentic-control-plane/agentgovbench && cd agentgovbench
+pip install -e .
+export ACP_API_KEY=gsk_...                  # the key the card shows; valid 24 hours
+export ACP_TENANT_SLUG=yourslug-agb         # the workspace the card shows
 agentgovbench run --runner acp_api --out results/acp-api.json
 ```
 
-Expected: **46/48** against `api.agenticcontrolplane.com`, with **5 declinations documented in the runner manifest** ([`results/acp_api-v0.1.0-live.json`](results/acp_api-v0.1.0-live.json)) — three of those still pass their checkable criteria; the two that don't are the cross-tenant scenarios, which require multi-tenant deployment mode. Different number? Either you're on an older ACP version, your tenant has custom policy that changes outcomes, or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+`ACP_BASE_URL` defaults to `https://api.agenticcontrolplane.com`; set it only for your own deployment. Your real workspace's policy is never read or changed. Clicking the button again reuses the same benchmark workspace and gives you a fresh 24-hour key.
 
-> **Scoring much lower than expected (e.g. 18/48)?** The most common cause is a missing scope on your API key. Symptoms: `audit_completeness 0/6`, lots of `tool_allowed: some calls were denied`, and a single `runner_errors_empty: ['audit GET 403: api key lacks admin.audit.read scope']`. Mint a new key with the scopes above and rerun.
+Expected: **46/48** against `api.agenticcontrolplane.com`, with **5 declinations documented in the runner manifest** ([`results/acp_api-v0.1.0-live.json`](results/acp_api-v0.1.0-live.json)) — three of those still pass their checkable criteria; the two that don't are the cross-tenant scenarios, which need multi-tenant deployment mode. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+
+> **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403), or the key itself (401). The runner stops rather than score scenarios that never got their policy — that would read as a plausible all-allow result, and it used to happen silently. Only a **Create benchmark workspace** key on its `-agb` workspace may write those policies. The API Keys page also still offers an **"AgentGovBench testing (24h, impersonation)"** scope preset; a key from it on your real workspace (or any other key) gets 403 here — it exists for ACP's own reference benchmark workspace, not for reproducing the score. Check the key hasn't expired and that `ACP_TENANT_SLUG` matches the workspace the card showed.
 
 ### 3. Run any framework — seven frameworks, each with a native and an ACP runner
 

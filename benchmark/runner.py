@@ -145,6 +145,13 @@ class BaseRunner(abc.ABC):
 # ── Utility base class with common state management ─────────────────
 
 
+class RunAborted(RuntimeError):
+    """Raised by a runner when it cannot produce a valid scorecard at all —
+    e.g. the product refuses the per-scenario policy fixtures. The CLI stops
+    the whole run instead of scoring scenarios that never got their policy
+    (which would read as a plausible but meaningless all-allow score)."""
+
+
 class StatefulRunner(BaseRunner):
     """Convenience base that tracks state between actions. Subclasses
     focus on the vendor-specific integration; this class handles the

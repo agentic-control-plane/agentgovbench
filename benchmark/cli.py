@@ -20,7 +20,7 @@ import click
 
 from . import SCENARIO_LIBRARY_VERSION, SPEC_VERSION
 from .loader import load_all
-from .runner import BaseRunner
+from .runner import BaseRunner, RunAborted
 from .scorer import aggregate, score_scenario
 from .types import ScenarioResult
 
@@ -195,6 +195,9 @@ def run(runner: str, category: Optional[str], scenarios_dir: str, out: Optional[
                     continue
                 runner_inst.execute_action(action)
             outcome = runner_inst.collect_outcome()
+        except RunAborted as e:
+            click.echo(f"\n[{i}/{len(scenarios)}] {scn.id}: RUN ABORTED — no scorecard produced.\n\n{e}", err=True)
+            sys.exit(2)
         except Exception as e:
             # A scenario the runner could not drive scores FAIL. It must not
             # leave the denominator: dropping it shrinks the total and
