@@ -40,6 +40,29 @@ def passed_by_id(path: str) -> dict[str, bool]:
     return {r["scenario_id"]: bool(r["passed"]) for r in data.get("results", [])}
 
 
+def not_applicable(path: str) -> dict[str, str]:
+    """Scenario ids the run reported N/A for its runner, with the reason.
+
+    N/A means the adapter could not exercise the scenario (no outage
+    simulation, one tenant credential). It is neither a pass nor a fail
+    and must not fail the check — but it is printed, every time, so a
+    scenario quietly leaving the denominator is never invisible. Files
+    written before the status field exist carry no N/A."""
+    with open(path) as f:
+        data = json.load(f)
+    return {
+        r["scenario_id"]: r.get("na_reason") or ""
+        for r in data.get("results", [])
+        if r.get("status") == "na"
+    }
+
+
+def declined(path: str) -> dict[str, str]:
+    with open(path) as f:
+        data = json.load(f)
+    return dict((data.get("runner") or {}).get("declined_categories") or {})
+
+
 def failing_assertions(path: str, scenario_id: str) -> list[str]:
     with open(path) as f:
         data = json.load(f)
@@ -56,14 +79,37 @@ def failing_assertions(path: str, scenario_id: str) -> list[str]:
 def main(baseline_path: str, current_path: str) -> int:
     base = passed_by_id(baseline_path)
     cur = passed_by_id(current_path)
-    regressions = sorted(s for s, ok in base.items() if ok and cur.get(s) is False)
+    cur_na = not_applicable(current_path)
+    cur_declined = declined(current_path)
+    # N/A and declined scenarios are outside the score on both sides: a
+    # baseline pass that is now N/A is not a regression (the adapter did
+    # not try), and a declined scenario was never the product's claim.
+    excluded = set(cur_na) | set(cur_declined)
+    regressions = sorted(
+        s for s, ok in base.items()
+        if ok and cur.get(s) is False and s not in excluded
+    )
     catalogue = catalogue_ids()
     absent = sorted(s for s, ok in base.items() if ok and s not in cur)
     retired = [s for s in absent if catalogue is not None and s not in catalogue]
     missing = [s for s in absent if s not in retired]
     improved = sorted(s for s, ok in cur.items() if ok and base.get(s) is False)
 
-    print(f"baseline {sum(base.values())}/{len(base)}  current {sum(cur.values())}/{len(cur)}")
+    def scored(passed: dict[str, bool], excl: set[str]) -> tuple[int, int]:
+        ids = [s for s in passed if s not in excl]
+        return sum(passed[s] for s in ids), len(ids)
+
+    bp, bt = scored(base, set(declined(baseline_path)) | set(not_applicable(baseline_path)))
+    cp, ct = scored(cur, excluded)
+    print(f"baseline {bp}/{bt}  current {cp}/{ct}"
+          + (f"  ({len(cur_na)} N/A for this runner" if cur_na else "")
+          + (f"{', ' if cur_na else '  ('}{len(cur_declined)} declined)" if cur_declined
+             else (")" if cur_na else "")))
+    for s in sorted(cur_na):
+        was = " (passed in baseline)" if base.get(s) else ""
+        print(f"N/A        {s}{was} — {cur_na[s]}")
+    for s in sorted(cur_declined):
+        print(f"DECLINED   {s} — {cur_declined[s]}")
     for s in improved:
         print(f"IMPROVED   {s}")
     for s in retired:

@@ -190,19 +190,21 @@ class Runner(StatefulRunner):
                     "subagents; parent's effective scope flows to children. "
                     "Product roadmap item."
                 ),
-                "cross_tenant_isolation.03_user_scope_does_not_leak": (
-                    "Requires multi-tenant deployment mode (path-based tenant "
-                    "routing). The deployed gateway runs in single-tenant mode."
-                ),
-                "cross_tenant_isolation.05_admin_cannot_cross": (
-                    "Same as 03 — single-tenant deployment mode can't honor "
-                    "URL-path tenant routing."
-                ),
-                "per_user_policy_enforcement.03_user_override_beats_workspace": (
-                    "Tests user-scope tool-specific overrides; harness + runner "
-                    "need types/YAML/write-path support for user.tools. "
-                    "Gateway side is ready (userOverrides.tools lookup shipped)."
-                ),
+            },
+            # What this adapter can physically do. Anything here that is
+            # False makes the scenarios needing it N/A for this runner —
+            # not run, not scored — instead of letting the adapter fake the
+            # step (see benchmark.runner.RunnerMetadata.capabilities).
+            capabilities={
+                # The gateway is a hosted service; this adapter cannot take
+                # it offline or make it return 5xx. The old client-side
+                # simulation decided the outcome itself and is stripped by
+                # the scorer, so those scenarios could only ever fail here.
+                "simulate_outage": False,
+                # True only when a second real benchmark tenant is resolved
+                # for tenant-b; otherwise both scenario tenants collapse onto
+                # one and isolation is unobservable.
+                "multi_tenant": TENANT_SLUG_MAP.get("tenant-b") in self._tenant_by_slug,
             },
         )
 
@@ -527,46 +529,17 @@ class Runner(StatefulRunner):
                 ))
             return outcome
 
-        # Task narrowing computed IN THE HARNESS. The gateway is not
-        # consulted; this block decides. That contradicts this runner's own
-        # declined_categories entry, which states ACP does not enforce
-        # task-scoped narrowing on subagents — and it is what made
-        # scope_inheritance.04 pass here while failing via crewai_acp,
-        # which has no equivalent shim.
-        #
-        # Marked source="harness" so the scorer excludes it. The scenario
-        # will fail, which matches the product's documented behaviour. If
-        # and when the gateway learns delegation semantics, delete this
-        # block and let the real decision be read back.
-        if a.agent_name and a.agent_name in self._delegated_scopes_by_agent:
-            delegated = self._delegated_scopes_by_agent[a.agent_name]
-            tool_obj = next(
-                (t for t in (self._scenario.setup.tools if self._scenario else [])
-                 if t.name == a.tool),
-                None,
-            )
-            required = set(tool_obj.required_scopes) if tool_obj else set()
-            if required and not required.issubset(delegated):
-                outcome = ToolOutcome(
-                    tool=a.tool, input=a.input, as_user=a.as_user,
-                    as_tenant=reported_tenant, allowed=False,
-                    reason="delegation_scope_violation",
-                    agent_tier=a.agent_tier, agent_name=a.agent_name,
-                    source="harness",
-                )
-                self._tool_outcomes.append(outcome)
-                # Emit a local SDK audit entry flagging the violation —
-                # this is still security-relevant info even though the
-                # gateway never saw it.
-                self._local_audit_entries.append(AuditEntry(
-                    timestamp=datetime.now(tz=timezone.utc).isoformat(),
-                    tenant=reported_tenant, actor_uid=a.as_user,
-                    actor_email=None, tool=a.tool, decision="deny",
-                    reason=f"delegation_scope_violation: required {sorted(required)}, delegated {sorted(delegated)}",
-                    trace_id=None, delegation_chain=list(self._chain_by_agent.get(a.agent_name, [])),
-                    extra={"source": "sdk_local", "enforcement": "task_narrowing"},
-                ))
-                return outcome
+        # No task-narrowing shim here. The runner used to deny a call
+        # itself when the agent's delegated scopes did not cover the tool —
+        # a decision the gateway never saw. The scorer stripped that
+        # harness-sourced outcome, but the side effect remained: the call
+        # never reached the product, so the product's own audit row (and
+        # its delegation chain) was never written. That is how
+        # delegation_provenance.05 "lost" its read_file entry. Every call
+        # goes to the gateway; what the gateway decides is the evidence.
+        # Declared delegated scopes are still tracked (above) for runners
+        # that forward them, and scope_inheritance.04 stays a product
+        # declination until the gateway enforces task narrowing.
 
         token = self._id_token_for(a.as_user)
         if not token:
