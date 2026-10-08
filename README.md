@@ -87,7 +87,7 @@ agentgovbench run --runner acp_api --out results/acp-api.json
 
 Before scoring anything the runner **preflights** the key: it reads the benchmark workspace's policy and writes the same document back (a no-op on success), so the gateway has to actually authorise a policy write with your key. If the gateway answers `403 human-auth-required`, the tenant in `ACP_TENANT_SLUG` is not a benchmark workspace and the run stops there with that explanation — no scorecard. The only way to drive a non-benchmark tenant is `ACP_ADMIN_TOKEN` (a Firebase ID token for a signed-in admin of that tenant); when set it is used for policy setup only, and the API key remains the credential whose behaviour is measured.
 
-With one benchmark workspace the `acp_api` runner measures 36 of the 48 scenarios and reports the rest as not measured (6 cross-tenant scenarios need a second tenant; 5 fail-mode scenarios need a real outage). Those are measured by the pieces below. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+With one benchmark workspace the `acp_api` runner measures 37 of the 48 scenarios and reports the other 11 as not measured (6 cross-tenant scenarios need a second tenant; 5 fail-mode scenarios need a real outage). In the merged scorecard all 6 fail-mode scenarios, including the no-failure baseline, are scored by the hook runner. Those are measured by the pieces below. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
 
 #### Measuring all 48
 

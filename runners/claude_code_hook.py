@@ -212,8 +212,15 @@ class Runner(StatefulRunner):
         # The outage is OBSERVED from what the hook itself said and wrote,
         # never from the scenario's own declaration.
         said = json.dumps(out).lower()
-        if down and "unreachable" in said:
+        if "unreachable" in said:
             self._saw_outage = True
+        # A crashed or silent hook is not an allow. Record a runner error and
+        # emit no outcome, so an assertion expecting an allow cannot pass on it.
+        if p.returncode != 0:  # a clean allow legitimately prints nothing
+            self._errors.append(
+                f"hook gave no decision (exit {p.returncode}) for {action.tool}: {p.stderr[:120]!r}"
+            )
+            return None
         outcome = ToolOutcome(
             tool=action.tool, input=action.input, as_user=action.as_user,
             as_tenant=action.as_tenant, allowed=not denied, reason=reason,
