@@ -6,7 +6,7 @@
 #   ./scripts/reproduce.sh
 #
 # Get the four values from the ACP console: API Keys -> "Reproduce our
-# AgentGovBench score" -> Create benchmark workspaces. Takes about 5 minutes.
+# AgentGovBench score" -> Create benchmark workspaces. Takes about 15 minutes.
 #
 # Three steps, nothing special-cased for ACP's own workspaces:
 #   1. acp_api runner     live HTTP against the hosted gateway on workspaces A and B
