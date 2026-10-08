@@ -5,6 +5,10 @@
 </p>
 
 <p align="center">
+  <strong>ACP: 46/48 as of 2026-10-08</strong> (<a href="https://github.com/agentic-control-plane/agentgovbench/actions/runs/37759892335">run 37759892335</a>)
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/Scenarios-48-5B5BD6" alt="48 scenarios" />
@@ -64,14 +68,14 @@ pip install -e .
 agentgovbench run --runner vanilla
 ```
 
-Expected: **13/48** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
+Expected: **13/48** (April 2026 figure; re-measure with the current scorer before quoting) ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
 
-### 2. Reproduce the ACP score in 5 minutes (all 48 scenarios)
+### 2. Reproduce the ACP score (all 48 scenarios, about 15 minutes)
 
-You need Python 3.10+, Node 18+, git, and a free ACP account. Expect about 5 minutes end to end (the live HTTP run is most of it).
+You need Python 3.10+, Node 18+, git, and a free ACP account. Expect about 15 minutes end to end; the live HTTP run is nearly all of it.
 
 1. Sign in to the [ACP console](https://cloud.agenticcontrolplane.com) as a workspace owner or admin, open **API Keys**, and in the **Reproduce our AgentGovBench score** card click **Create benchmark workspaces**. (An API key can't do this step; it has to be a signed-in human.)
-2. The card creates two throwaway workspaces, `<yourslug>-agb` and `<yourslug>-agb-b` (the second is needed for the six cross-tenant scenarios), and shows a 24-hour key for each, once. You are the owner of both. Your real workspace's policy is never read or changed.
+2. The card creates two throwaway workspaces, `<yourslug>-agb` and `<yourslug>-agb-b` (the second is needed for the six cross-tenant scenarios), and shows a 24-hour key for each, once. You own workspace A; workspace B is administered by a synthetic admin account the card creates, so the cross-tenant scenarios run between two workspaces with different admins. Your real workspace's policy is never read or changed.
 3. Run the command the card prints:
 
 ```bash
@@ -97,7 +101,7 @@ The runner **preflights** each key (reads the workspace's policy and writes it b
 
 How the hook runner is honest about what it is: the hook is the unmodified shipped file and the outage is real, but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in (the hook is pointed at it through the plugin's own dev override file under a temp HOME). This category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so a `fail_open` scenario runs as an attended session and `fail_closed` as an unattended one. That mapping is the runner's and part of the method, not a product claim.
 
-The merged, dated scorecard is also produced daily by [the workflow](.github/workflows/daily-acp-regression.yml).
+The merged, dated scorecard is also produced by [the scheduled workflow](.github/workflows/daily-acp-regression.yml).
 
 Known non-passes in the last published run, counted in the score: `scope_inheritance.04_task_narrowing` (declined: ACP does not yet hold a sub-agent to a narrower task than its parent's scope) and `fail_mode_discipline.05_no_audit_without_governance` (the hook's offline record of an ungoverned call carries no user identity, so the scenario's attribution check cannot be met client-side). Your run names whatever it finds.
 
@@ -142,7 +146,7 @@ Same gateway. Same scenarios. Same scorer. The spread is architectural, not prod
 - **Framework-agnostic** — scenarios don't assume CrewAI, LangGraph, Claude, etc. They describe actions and expected governance outcomes.
 - **Pluggable** — any governance product implements the `BaseRunner` interface. No ACP assumptions in the scenarios.
 - **Versioned** — each scenario carries a version. Old results remain comparable; new scenarios extend the set without breaking history.
-- **Published honest** — the reference ACP runner declares 5 declinations in its own committed result file, reasons included (single-tenant runner scope, one capability ACP doesn't have yet). A benchmark that says *"we pass everything"* isn't credible.
+- **Published honest** — the ACP scorecard names every declined or unmeasured scenario and counts it as a failure. Today that is one declination (task narrowing) and one failing check (the offline record of an ungoverned call doesn't name the user). A benchmark that says *"we pass everything"* isn't credible.
 
 ## Submitting results for your product
 
@@ -156,9 +160,9 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklis
 
 ## Status
 
-**v0.2** — 48 scenarios across 8 categories. ACP is scored out of all 48 by `scripts/scorecard.py` from two runners (HTTP against production, and the real Claude Code hook for the outage scenarios); see the daily workflow summary for the dated number. The old per-framework figures below predate runner-neutral scoring and are historical. Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
+**v0.2** — 48 scenarios across 8 categories. ACP is scored out of all 48 by `scripts/scorecard.py` from two runners (HTTP against production, and the real Claude Code hook for the outage scenarios); see the daily workflow summary for the dated number. The old per-framework figures above predate runner-neutral scoring and are historical. Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
 
-Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We're the first to put a number on our own governance product; we'd like the rest of the space to follow.
+Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We put a number on our own product; we'd like the rest of the space to do the same.
 
 ## Citing
 
