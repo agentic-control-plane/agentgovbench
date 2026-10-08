@@ -87,6 +87,10 @@ from runners.acp import (
 )
 
 
+# hookEvent values that mark a governed agent tool call in the audit log.
+_GOVERNED_HOOK_EVENTS = ("PreToolUse", "PostToolUse")
+
+
 class Runner(AcpRunner):
     """ACP runner that uses only the public admin HTTP API + an API key."""
 
@@ -818,6 +822,41 @@ class Runner(AcpRunner):
 
     # ── Audit read — via /admin/audit ──────────────────────────────────
 
+    def _do_fan_out(self, a: ParallelFanOut) -> ToolOutcome:
+        """Fire the burst inside the scenario's window.
+
+        The inherited fan-out is serial, so over a remote gateway 90 calls
+        at ~0.7s each take longer than the 60s limiter window: the oldest
+        calls slide out before the last land and the count allowed creeps
+        past the limit (rate_limit_cascade.02 saw 64 vs 63). Calls are
+        released on an ABSOLUTE schedule (start + i * interval, no drift
+        from slow calls) across a small pool, and the whole burst is
+        budgeted at half the window.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        total = a.worker_count * a.calls_per_worker
+        if total <= 0:
+            return None  # type: ignore[return-value]
+        window = float(getattr(a, "window_seconds", 60) or 60)
+        interval = (window * 0.5) / total
+        start = time.monotonic()
+
+        def one(i: int) -> ToolOutcome:
+            delay = start + i * interval - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            return self._do_direct(DirectToolCall(
+                tool=a.tool, input=a.input,
+                as_user=a.as_user, as_tenant=a.as_tenant,
+                agent_tier=a.agent_tier,
+                agent_name=f"worker-{i // a.calls_per_worker}",
+            ))
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = list(pool.map(one, range(total)))
+        return outcomes[-1]
+
     def audit_log(self) -> list[AuditEntry]:
         if not self._scenario_start_ts:
             return []
@@ -876,6 +915,20 @@ class Runner(AcpRunner):
             # deployments predating the toolRaw field.
             tool = data.get("toolRaw") or data.get("tool") or ""
             if not tool:
+                continue
+            # Only governed tool calls count. Setup / AdminAction /
+            # PolicyChange rows are written by the harness's own setup
+            # writes and are not agent activity; counting them made
+            # isolation scenarios report setup noise as leaks
+            # (cross_tenant_isolation.02 counted 9). llm.* rows pass, as do
+            # rows from deployments that predate the hookEvent field.
+            hook_event = data.get("hookEvent")
+            if (
+                isinstance(hook_event, str)
+                and hook_event
+                and hook_event not in _GOVERNED_HOOK_EVENTS
+                and not tool.startswith("llm.")
+            ):
                 continue
             real_uid = data.get("sub")
             uid = REVERSE_UID_MAP.get(real_uid, real_uid)
@@ -953,13 +1006,12 @@ class Runner(AcpRunner):
         # full bucket and its expected deny count doesn't land. Parent
         # `AcpRunner.setup()` has this logic but this override skipped
         # parent; restore it here.
-        scenario_is_rate_heavy = (
-            scenario.category == "rate_limit_cascade"
-            and any(
-                hasattr(a, "calls_per_worker")
-                and getattr(a, "calls_per_worker", 0) * getattr(a, "worker_count", 1) >= 30
-                for a in scenario.actions
-            )
+        # Any category: cross_tenant_isolation.04 also fills a bucket, and
+        # the leftover broke identity_propagation.01 and fail_mode .06.
+        scenario_is_rate_heavy = any(
+            hasattr(a, "calls_per_worker")
+            and getattr(a, "calls_per_worker", 0) * getattr(a, "worker_count", 1) >= 30
+            for a in scenario.actions
         )
         # A rate-heavy scenario poisons the bucket for EVERY later
         # scenario that reuses the same user+tier inside the 60s window,
