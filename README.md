@@ -66,50 +66,40 @@ agentgovbench run --runner vanilla
 
 Expected: **13/48** ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
 
-### 2. Reproducing the ACP score (zero Firebase, ~5 minutes)
+### 2. Reproduce the ACP score in 5 minutes (all 48 scenarios)
 
-Hits a live ACP deployment using only an API key — no Firebase Admin SDK, no service-account JSON.
+You need Python 3.10+, Node 18+, git, and a free ACP account. Expect about 5 minutes end to end (the live HTTP run is most of it).
 
-Every scenario writes its own policy before it runs, and the runner clears policy between scenarios. ACP never lets an API key change the policy of a real workspace (an agent's key must not be able to loosen its own rules), so the benchmark runs in a **separate benchmark workspace** with a short-lived key that may write policy only there:
-
-1. Sign in to the [ACP console](https://cloud.agenticcontrolplane.com) as a workspace owner or admin → **API Keys** → in the **Reproduce our AgentGovBench score** card, click **Create benchmark workspace**. (An API key can't do this step — it has to be a signed-in human.)
-2. It creates a workspace named `<yourslug>-agb`, shows a key once (expires in 24 hours), and prints the command. Copy and run it:
+1. Sign in to the [ACP console](https://cloud.agenticcontrolplane.com) as a workspace owner or admin, open **API Keys**, and in the **Reproduce our AgentGovBench score** card click **Create benchmark workspaces**. (An API key can't do this step; it has to be a signed-in human.)
+2. The card creates two throwaway workspaces, `<yourslug>-agb` and `<yourslug>-agb-b` (the second is needed for the six cross-tenant scenarios), and shows a 24-hour key for each, once. You are the owner of both. Your real workspace's policy is never read or changed.
+3. Run the command the card prints:
 
 ```bash
 git clone https://github.com/agentic-control-plane/agentgovbench && cd agentgovbench
-pip install -e .
-export ACP_API_KEY=gsk_...                  # the key the card shows; valid 24 hours
-export ACP_TENANT_SLUG=yourslug-agb         # the workspace the card shows
-agentgovbench run --runner acp_api --out results/acp-api.json
+export ACP_API_KEY=gsk_...             # workspace A key
+export ACP_TENANT_SLUG=yourslug-agb
+export ACP_API_KEY_B=gsk_...           # workspace B key
+export ACP_TENANT_SLUG_B=yourslug-agb-b
+./scripts/reproduce.sh
 ```
 
-`ACP_BASE_URL` defaults to `https://api.agenticcontrolplane.com`; set it only for your own deployment. Your real workspace's policy is never read or changed. Clicking the button again reuses the same benchmark workspace and gives you a fresh 24-hour key.
+`scripts/reproduce.sh` does three things and nothing special-cased for ACP's own workspaces:
 
-Before scoring anything the runner **preflights** the key: it reads the benchmark workspace's policy and writes the same document back (a no-op on success), so the gateway has to actually authorise a policy write with your key. If the gateway answers `403 human-auth-required`, the tenant in `ACP_TENANT_SLUG` is not a benchmark workspace and the run stops there with that explanation — no scorecard. The only way to drive a non-benchmark tenant is `ACP_ADMIN_TOKEN` (a Firebase ID token for a signed-in admin of that tenant); when set it is used for policy setup only, and the API key remains the credential whose behaviour is measured.
+1. Creates a virtualenv (first Python 3.10+ that can build one) and installs the benchmark.
+2. Runs the `acp_api` runner live against the hosted gateway on both workspaces (the 42 non-fail-mode scenarios, including cross-tenant).
+3. Runs the `claude_code_hook` runner: the real, unmodified shipped Claude Code hook, fetched at a pinned plugin commit (override with `AGB_PLUGIN_REF`), with ACP really unreachable. No account needed for this part. Then `scripts/scorecard.py` merges both into **`ACP X/48`** and `results/SCORECARD.md`, which records the hook commit that was measured.
 
-With one benchmark workspace the `acp_api` runner measures 37 of the 48 scenarios and reports the other 11 as not measured (6 cross-tenant scenarios need a second tenant; 5 fail-mode scenarios need a real outage). In the merged scorecard all 6 fail-mode scenarios, including the no-failure baseline, are scored by the hook runner. Those are measured by the pieces below. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+You get your own X/48. Declined and unmeasured scenarios count against the score and are named in the table. Different from the published number? Either you're on a different ACP or plugin version, or you've found a gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
 
-#### Measuring all 48
+`ACP_BASE_URL` defaults to `https://api.agenticcontrolplane.com`; set it only for your own deployment. Clicking the button again reuses the same pair and mints fresh keys.
 
-The published score is out of **48**. Declined scenarios count as failures and are named; a scenario nobody measured counts against the score. Two more pieces cover the rest:
+The runner **preflights** each key (reads the workspace's policy and writes it back) before scoring. A `403 human-auth-required` means the slug is not a benchmark workspace and the run stops with no scorecard, rather than scoring scenarios that never got their policy.
 
-- **Cross-tenant (6 scenarios):** create a second benchmark workspace the same way and export its key too: `export ACP_API_KEY_B=gsk_... ACP_TENANT_SLUG_B=yourslug-b-agb`. The runner then maps the scenarios' two tenants onto two real ones.
-- **Fail-mode (6 scenarios, 5 need an outage):** these test what the client does when ACP is unreachable, which the shipped Claude Code hook decides, not the hosted gateway. The `claude_code_hook` runner executes the real, unmodified `govern.mjs` with the gateway really down (a closed local port, a local server answering HTTP 500). It needs only node and a clone of the plugin; no credentials:
+How the hook runner is honest about what it is: the hook is the unmodified shipped file and the outage is real, but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in (the hook is pointed at it through the plugin's own dev override file under a temp HOME). This category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so a `fail_open` scenario runs as an attended session and `fail_closed` as an unattended one. That mapping is the runner's and part of the method, not a product claim.
 
-```bash
-git clone https://github.com/agentic-control-plane/claude-code-acp-plugin
-AGB_CC_PLUGIN=$PWD/claude-code-acp-plugin/bin/govern.mjs \
-  agentgovbench run --runner claude_code_hook --category fail_mode_discipline --out hook.json
-python scripts/scorecard.py results/acp-api.json hook.json --date $(date +%F)   # merged X/48 + SCORECARD.md
-```
+The merged, dated scorecard is also produced daily by [the workflow](.github/workflows/daily-acp-regression.yml).
 
-How the hook runner is honest about what it is: the hook is the unmodified shipped file; the outage is real; but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in, so this category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so the runner runs a `fail_open` scenario as an attended session and a `fail_closed` one as an unattended one. That mapping is the runner's and is part of the method, not a product claim.
-
-The merged, dated scorecard (which runner measured which scenario, every non-pass named) is produced daily by [the workflow](.github/workflows/daily-acp-regression.yml) and published in each [run's summary](https://github.com/agentic-control-plane/agentgovbench/actions/workflows/daily-acp-regression.yml).
-
-Known non-passes counted in the score: `scope_inheritance.04_task_narrowing` (declined: ACP does not yet hold a sub-agent to a narrower task than its parent's scope) and `fail_mode_discipline.05_no_audit_without_governance` (the hook's offline record of an ungoverned call carries no user identity, so the scenario's attribution check cannot be met client-side).
-
-> **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403), or the key itself (401). The runner stops rather than score scenarios that never got their policy — that would read as a plausible all-allow result, and it used to happen silently. Only a **Create benchmark workspace** key on its `-agb` workspace may write those policies. The API Keys page also still offers an **"AgentGovBench testing (24h, impersonation)"** scope preset; a key from it on your real workspace (or any other key) gets 403 here — it exists for ACP's own reference benchmark workspace, not for reproducing the score. Check the key hasn't expired and that `ACP_TENANT_SLUG` matches the workspace the card showed.
+> **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403) or the key itself (401). Only a **Create benchmark workspaces** key on its own `-agb` workspace may write those policies. Check the keys haven't expired (24h) and that the slugs match what the card showed.
 
 ### 3. Run any framework — seven frameworks, each with a native and an ACP runner
 
