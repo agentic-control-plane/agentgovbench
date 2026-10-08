@@ -56,7 +56,55 @@ from benchmark.types import (
     AuditEntry, DirectToolCall, GatewayFailure, ToolOutcome,
 )
 
-DEFAULT_HOOK = Path.home() / "dev/claude-code-acp-plugin/bin/govern.mjs"
+PLUGIN_REPO = "https://github.com/agentic-control-plane/claude-code-acp-plugin.git"
+# The released hook this build of the benchmark measures by default: plugin
+# 0.28.0 ("Release 0.28.0"). Pinned so a reproduction run measures a fixed,
+# named artifact and not whatever main is today; override with AGB_PLUGIN_REF
+# (any commit SHA, or a branch/tag name such as `main`) to measure another.
+# The ref and the exact commit SHA that was executed are recorded in the
+# result file and printed in the SCORECARD header.
+PINNED_PLUGIN_REF = "cb043a8e81f0d8382dba9e45a4e9ed7ec4c8606c"
+
+
+def _git(*args: str, cwd: Optional[Path] = None) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, timeout=180,
+    ).stdout.strip()
+
+
+def resolve_hook() -> tuple[Path, str, str]:
+    """Return (path to govern.mjs, ref, commit sha) of the hook to execute.
+
+    AGB_CC_PLUGIN (an explicit path to a govern.mjs) wins and is labelled as
+    such. Otherwise the plugin is fetched, unmodified, at AGB_PLUGIN_REF
+    (default: the pinned release) into a per-user cache and the commit that
+    was actually checked out is reported.
+    """
+    explicit = os.environ.get("AGB_CC_PLUGIN", "").strip()
+    if explicit:
+        hook = Path(explicit)
+        try:
+            sha = _git("rev-parse", "HEAD", cwd=hook.parent)
+        except Exception:  # noqa: BLE001 - not a git checkout
+            sha = "unknown"
+        return hook, "AGB_CC_PLUGIN", sha
+    ref = os.environ.get("AGB_PLUGIN_REF", "").strip() or PINNED_PLUGIN_REF
+    cache = Path(os.environ.get("AGB_CACHE_DIR", Path.home() / ".cache" / "agentgovbench"))
+    dest = cache / "claude-code-acp-plugin"
+    try:
+        if not (dest / ".git").exists():
+            dest.mkdir(parents=True, exist_ok=True)
+            _git("init", "-q", cwd=dest)
+        _git("fetch", "-q", "--depth", "1", PLUGIN_REPO, ref, cwd=dest)
+        _git("checkout", "-q", "--force", "FETCH_HEAD", cwd=dest)
+        sha = _git("rev-parse", "HEAD", cwd=dest)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(
+            f"could not fetch the Claude Code hook at {ref} from {PLUGIN_REPO}: {e}. "
+            "Check your network, or clone the plugin yourself and set "
+            "AGB_CC_PLUGIN=<clone>/bin/govern.mjs."
+        ) from e
+    return dest / "bin" / "govern.mjs", ref, sha
 
 # Unattended entrypoint: the plugin reads CLAUDE_CODE_ENTRYPOINT (`claude -p`).
 UNATTENDED_ENTRYPOINT = "sdk-cli"
@@ -94,7 +142,9 @@ def _closed_port() -> int:
 class Runner(StatefulRunner):
     def __init__(self) -> None:
         super().__init__()
-        self._hook = Path(os.environ.get("AGB_CC_PLUGIN", str(DEFAULT_HOOK)))
+        self._hook: Path = Path("")
+        self._hook_ref = ""
+        self._hook_sha = ""
         self._server: Optional[ThreadingHTTPServer] = None
         self._home: Optional[str] = None
         self._down_until = 0.0
@@ -118,20 +168,18 @@ class Runner(StatefulRunner):
                 "posture only; recovery and baseline use a local always-allow "
                 "stub as the gateway. fail_mode is exercised through the tier "
                 "the plugin keys on: fail_open as an attended session, "
-                "fail_closed as an unattended one."
+                "fail_closed as an unattended one. "
+                f"[hook ref={self._hook_ref or 'unresolved'} sha={self._hook_sha or 'unresolved'}]"
             ),
             capabilities={"simulate_outage": True, "multi_tenant": False},
         )
 
     def preflight(self) -> None:
-        if not self._hook.exists():
-            raise RuntimeError(
-                f"hook not found at {self._hook}. Set AGB_CC_PLUGIN to the "
-                "plugin's bin/govern.mjs (git clone "
-                "https://github.com/agentic-control-plane/claude-code-acp-plugin)."
-            )
         if shutil.which("node") is None:
             raise RuntimeError("node not found on PATH; the hook is a Node script.")
+        self._hook, self._hook_ref, self._hook_sha = resolve_hook()
+        if not self._hook.exists():
+            raise RuntimeError(f"hook not found at {self._hook} (AGB_CC_PLUGIN must point at bin/govern.mjs).")
 
     def setup(self, scenario) -> None:
         super().setup(scenario)
@@ -178,6 +226,11 @@ class Runner(StatefulRunner):
             return None
         down = time.time() < self._down_until
         base = self._base()
+        # Plugin 0.28+ only accepts ACP hosts from ACP_*_BASE; its supported
+        # test override is ~/.acp/dev_base_override. HOME is this scenario's
+        # throwaway temp dir, so this points only this hook run at the local
+        # stub / closed port. Older releases ignore the file and use the env.
+        Path(self._home, ".acp", "dev_base_override").write_text(base + "\n")
         env = {
             "PATH": os.environ.get("PATH", ""),
             "HOME": self._home,

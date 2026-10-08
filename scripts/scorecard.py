@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,8 +42,15 @@ def load(path: str) -> dict:
     return {
         "runner": (data.get("runner") or {}).get("name", "?"),
         "declined": (data.get("runner") or {}).get("declined_categories") or {},
+        "notes": (data.get("runner") or {}).get("notes") or "",
         "by_id": {r["scenario_id"]: r for r in data.get("results", [])},
     }
+
+
+def hook_provenance(notes: str) -> str:
+    """The hook runner stamps `[hook ref=<ref> sha=<commit>]` into its notes."""
+    m = re.search(r"\[hook ref=(\S+) sha=(\S+)\]", notes)
+    return f"{m.group(2)} (ref {m.group(1)})" if m else "not recorded"
 
 
 def main() -> int:
@@ -84,6 +92,7 @@ def main() -> int:
         "Counted out of every scenario. Declined scenarios count as failures and are named below; "
         "a scenario no runner measured counts against the score.", "",
         f"Run: {a.run_url or 'local'}", "",
+        f"Hook measured (fail_mode_discipline): claude-code-acp-plugin {hook_provenance(hook['notes'])}", "",
         "| Scenario | Measured by | Result | Note |", "|---|---|---|---|",
     ]
     for r in rows:
