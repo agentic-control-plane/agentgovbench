@@ -12,7 +12,8 @@
 #   1. acp_api runner     live HTTP against the hosted gateway on workspaces A and B
 #                         (42 scenarios, including the 6 cross-tenant ones)
 #   2. claude_code_hook   the real, unmodified shipped Claude Code hook, run with
-#                         ACP really unreachable (the 6 fail-mode scenarios);
+#                         the gateway really unreachable (the 6 fail-mode scenarios;
+#                         recovery and baseline use a local always-allow stand-in);
 #                         needs no account, only git + node
 #   3. scorecard.py       merges both into "ACP X/48" + results/SCORECARD.md.
 #                         Declined and unmeasured scenarios count against it.

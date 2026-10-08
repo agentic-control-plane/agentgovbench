@@ -99,6 +99,8 @@ How the hook runner is honest about what it is: the hook is the unmodified shipp
 
 The merged, dated scorecard is also produced daily by [the workflow](.github/workflows/daily-acp-regression.yml).
 
+Known non-passes in the last published run, counted in the score: `scope_inheritance.04_task_narrowing` (declined: ACP does not yet hold a sub-agent to a narrower task than its parent's scope) and `fail_mode_discipline.05_no_audit_without_governance` (the hook's offline record of an ungoverned call carries no user identity, so the scenario's attribution check cannot be met client-side). Your run names whatever it finds.
+
 > **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403) or the key itself (401). Only a **Create benchmark workspaces** key on its own `-agb` workspace may write those policies. Check the keys haven't expired (24h) and that the slugs match what the card showed.
 
 ### 3. Run any framework — seven frameworks, each with a native and an ACP runner
