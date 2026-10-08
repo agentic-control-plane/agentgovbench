@@ -87,7 +87,27 @@ agentgovbench run --runner acp_api --out results/acp-api.json
 
 Before scoring anything the runner **preflights** the key: it reads the benchmark workspace's policy and writes the same document back (a no-op on success), so the gateway has to actually authorise a policy write with your key. If the gateway answers `403 human-auth-required`, the tenant in `ACP_TENANT_SLUG` is not a benchmark workspace and the run stops there with that explanation — no scorecard. The only way to drive a non-benchmark tenant is `ACP_ADMIN_TOKEN` (a Firebase ID token for a signed-in admin of that tenant); when set it is used for policy setup only, and the API key remains the credential whose behaviour is measured.
 
-Expected: **46/48** against `api.agenticcontrolplane.com`, with **5 declinations documented in the runner manifest** ([`results/acp_api-v0.1.0-live.json`](results/acp_api-v0.1.0-live.json)) — three of those still pass their checkable criteria; the two that don't are the cross-tenant scenarios, which need multi-tenant deployment mode. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+With one benchmark workspace the `acp_api` runner measures 36 of the 48 scenarios and reports the rest as not measured (6 cross-tenant scenarios need a second tenant; 5 fail-mode scenarios need a real outage). Those are measured by the pieces below. Different number? Either you're on an older ACP version or you've found a governance gap we haven't seen. [File an issue.](https://github.com/agentic-control-plane/agentgovbench/issues)
+
+#### Measuring all 48
+
+The published score is out of **48**. Declined scenarios count as failures and are named; a scenario nobody measured counts against the score. Two more pieces cover the rest:
+
+- **Cross-tenant (6 scenarios):** create a second benchmark workspace the same way and export its key too: `export ACP_API_KEY_B=gsk_... ACP_TENANT_SLUG_B=yourslug-b-agb`. The runner then maps the scenarios' two tenants onto two real ones.
+- **Fail-mode (6 scenarios, 5 need an outage):** these test what the client does when ACP is unreachable, which the shipped Claude Code hook decides, not the hosted gateway. The `claude_code_hook` runner executes the real, unmodified `govern.mjs` with the gateway really down (a closed local port, a local server answering HTTP 500). It needs only node and a clone of the plugin; no credentials:
+
+```bash
+git clone https://github.com/agentic-control-plane/claude-code-acp-plugin
+AGB_CC_PLUGIN=$PWD/claude-code-acp-plugin/bin/govern.mjs \
+  agentgovbench run --runner claude_code_hook --category fail_mode_discipline --out hook.json
+python scripts/scorecard.py results/acp-api.json hook.json --date $(date +%F)   # merged X/48 + SCORECARD.md
+```
+
+How the hook runner is honest about what it is: the hook is the unmodified shipped file; the outage is real; but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in, so this category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so the runner runs a `fail_open` scenario as an attended session and a `fail_closed` one as an unattended one. That mapping is the runner's and is part of the method, not a product claim.
+
+The merged, dated scorecard (which runner measured which scenario, every non-pass named) is produced daily by [the workflow](.github/workflows/daily-acp-regression.yml) and published in each [run's summary](https://github.com/agentic-control-plane/agentgovbench/actions/workflows/daily-acp-regression.yml).
+
+Known non-passes counted in the score: `scope_inheritance.04_task_narrowing` (declined: ACP does not yet hold a sub-agent to a narrower task than its parent's scope) and `fail_mode_discipline.05_no_audit_without_governance` (the hook's offline record of an ungoverned call carries no user identity, so the scenario's attribution check cannot be met client-side).
 
 > **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403), or the key itself (401). The runner stops rather than score scenarios that never got their policy — that would read as a plausible all-allow result, and it used to happen silently. Only a **Create benchmark workspace** key on its `-agb` workspace may write those policies. The API Keys page also still offers an **"AgentGovBench testing (24h, impersonation)"** scope preset; a key from it on your real workspace (or any other key) gets 403 here — it exists for ACP's own reference benchmark workspace, not for reproducing the score. Check the key hasn't expired and that `ACP_TENANT_SLUG` matches the workspace the card showed.
 
@@ -112,7 +132,7 @@ Each framework runner requires the respective SDK. Install with `pip install -e 
 
 ## The seven-framework result
 
-We ran every runner against the same backend and published every scorecard. The nine-point spread tells the story:
+Historical, from the first release (April 2026), before runner-neutral scoring and before the daily run; not re-measured since, so do not compare these to the dated ACP score above. We ran every runner against the same backend and published every scorecard. The nine-point spread tells the story:
 
 | Integration pattern | Frameworks | Score |
 |---|---|---|
@@ -144,7 +164,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklis
 
 ## Status
 
-**v0.2** — 48 scenarios across 8 categories. Reference ACP runner passes 46/48 with 5 documented declinations (see the committed result file). Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
+**v0.2** — 48 scenarios across 8 categories. ACP is scored out of all 48 by `scripts/scorecard.py` from two runners (HTTP against production, and the real Claude Code hook for the outage scenarios); see the daily workflow summary for the dated number. The old per-framework figures below predate runner-neutral scoring and are historical. Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
 
 Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We're the first to put a number on our own governance product; we'd like the rest of the space to follow.
 

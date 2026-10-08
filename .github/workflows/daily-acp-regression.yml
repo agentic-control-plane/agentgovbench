@@ -1,9 +1,19 @@
 name: Daily ACP regression
 
 # Runs the full scenario set against production ACP every day and fails if
-# any scenario that passes in the committed baseline fails now. The key is a
-# gsk_ key on the dedicated `agentgovbench` benchmark workspace only, with
-# bench.impersonate + admin.audit.read — it cannot touch a real workspace.
+# any scenario that passes in the committed baseline fails now.
+#
+# Three jobs, one scorecard out of ALL scenarios:
+#   bench     acp_api runner, live against production, two benchmark
+#             workspaces (A and B) so the cross-tenant scenarios are measured.
+#   failmode  claude_code_hook runner: the real shipped Claude Code hook with
+#             the gateway really down. Outage behaviour is decided by that
+#             client-side hook, which the HTTP runner cannot exercise.
+#   scorecard merges the two. Declined and unmeasured scenarios count against
+#             the score.
+#
+# The keys are gsk_ keys on the dedicated benchmark workspaces only, with
+# bench.impersonate + admin.audit.read; they cannot touch a real workspace.
 # Secrets are not exposed to pull requests from forks.
 
 on:
@@ -26,6 +36,10 @@ jobs:
       ACP_API_KEY: ${{ secrets.ACP_BENCH_API_KEY }}
       ACP_BASE_URL: https://api.agenticcontrolplane.com
       ACP_TENANT_SLUG: agentgovbench
+      # Second benchmark workspace, for cross_tenant_isolation. Unset secret
+      # means those scenarios are not measured and count against the score.
+      ACP_API_KEY_B: ${{ secrets.ACP_BENCH_API_KEY_B }}
+      ACP_TENANT_SLUG_B: agentgovbench-b
       BASELINE: results/acp_api-v0.1.0-live.json
     steps:
       - uses: actions/checkout@v4
@@ -46,10 +60,73 @@ jobs:
       - name: Re-run on regression
         if: steps.compare.outcome == 'failure'
         run: |
-          agentgovbench run --runner acp_api -v --out current-retry.json
-          python scripts/regression_check.py "$BASELINE" current-retry.json
+          agentgovbench run --runner acp_api -v --out current.json
+          python scripts/regression_check.py "$BASELINE" current.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: agentgovbench-results
-          path: current*.json
+          path: current.json
+
+  failmode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -e .
+      # The shipped hook, unmodified. Pin PLUGIN_REF to a release tag to
+      # measure a specific release; the default measures the current main.
+      - name: Fetch the real Claude Code hook
+        env:
+          PLUGIN_REF: ${{ vars.ACP_PLUGIN_REF || 'main' }}
+        run: git clone --depth 1 --branch "$PLUGIN_REF" https://github.com/agentic-control-plane/claude-code-acp-plugin.git "$RUNNER_TEMP/plugin"
+      - name: Run fail_mode_discipline through the real hook
+        env:
+          AGB_CC_PLUGIN: ${{ runner.temp }}/plugin/bin/govern.mjs
+        run: agentgovbench run --runner claude_code_hook --category fail_mode_discipline -v --out hook.json
+      - name: Record the hook version measured
+        if: always()
+        run: git -C "$RUNNER_TEMP/plugin" log -1 --format='plugin %H' | tee hook-version.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentgovbench-hook
+          path: |
+            hook.json
+            hook-version.txt
+
+  scorecard:
+    needs: [bench, failmode]
+    if: always() && needs.bench.result != 'skipped' && needs.failmode.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: agentgovbench-results
+      - uses: actions/download-artifact@v4
+        with:
+          name: agentgovbench-hook
+      - name: Merge into one scorecard
+        run: |
+          python scripts/scorecard.py current.json hook.json \
+            --date "$(date -u +%F)" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --out-dir . | tee scorecard.txt
+          cat SCORECARD.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentgovbench-scorecard
+          path: |
+            scorecard.json
+            SCORECARD.md
+            scorecard.txt
