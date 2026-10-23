@@ -141,11 +141,16 @@ class Runner(StatefulRunner):
         self._tenant_by_slug: dict[str, str] = {
             t["slug"]: t["tenant_id"] for t in self._env.get("tenants", [])
         }
-        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS",
-                                    "/Users/dev/dev/gatewaystack-connect/secrets/gatewaystack-connect-891514f0c67f.json")
         try:
             get_app()
         except ValueError:
+            creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            if not creds_path:
+                raise RuntimeError(
+                    "GOOGLE_APPLICATION_CREDENTIALS is not set. Point it at the "
+                    "service-account JSON for the Firebase project named in "
+                    "setup/benchmark_env.yaml (see the module docstring)."
+                ) from None
             initialize_app(credentials.Certificate(creds_path))
         self._db = firestore.client()
         self._token_cache: dict[str, tuple[str, float]] = {}  # uid → (id_token, expires_at)
