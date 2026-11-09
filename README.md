@@ -1,11 +1,11 @@
 <h1 align="center">AgentGovBench</h1>
 
 <p align="center">
-  <strong>An open benchmark for AI agent governance. Mapped to NIST AI RMF. Vendor-neutral.</strong>
+  <strong>An open benchmark for how agent runtimes handle identity, policy and audit. Written by the ACP team, and ACP is the only product scored so far.</strong>
 </p>
 
 <p align="center">
-  <strong>ACP: 46/48 as of 2026-10-08</strong> (<a href="https://github.com/agentic-control-plane/agentgovbench/actions/runs/37759892335">run 37759892335</a>)
+  <strong>ACP: 46/48 on 2026-11-08</strong> (<a href="https://github.com/agentic-control-plane/agentgovbench/actions/runs/42509719761">run 42509719761</a>). The daily run updates this; see the latest <a href="https://github.com/agentic-control-plane/agentgovbench/actions/workflows/daily-acp-regression.yml">daily-acp-regression</a> run.
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 ## What it measures
 
-Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **model** — does the LLM refuse harmful prompts, resist injection, protect PII. AgentGovBench tests the **governance layer around the model** — the part responsible for who can call which tool, whose identity rides along with each call, how rate limits cascade across delegated subagents, and what the audit record contains after the fact.
+Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **model**: does the LLM refuse harmful prompts, resist injection, protect PII. AgentGovBench tests the **governance layer around the model**: who can call which tool, whose identity rides along with each call, how rate limits cascade across delegated subagents, and what the audit record contains after the fact.
 
 ```
   What other benchmarks test             What AgentGovBench tests
@@ -39,7 +39,7 @@ Existing benchmarks (HarmBench, InjecAgent, AgentDAM, AgentLeak) test the **mode
                                          (logs enough to reconstruct?)
 ```
 
-Eight categories, each mapped to one or more <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">NIST AI RMF 1.0</a> controls:
+Eight categories, each mapped to one or more <a href="https://doi.org/10.6028/NIST.AI.100-1" target="_blank" rel="noopener">NIST AI RMF 1.0</a> controls. The mapping is ours; NIST has not reviewed or endorsed it.
 
 | # | Category | What breaks if this fails | NIST |
 |---|---|---|---|
@@ -58,7 +58,7 @@ Deeper rationale and threat model: [`METHODOLOGY.md`](METHODOLOGY.md). Full cont
 
 ### 1. Run the no-governance baseline (zero setup, ~60 seconds)
 
-Works on a fresh clone with no credentials. Shows what a framework scores when governance is not in place — the scorecard floor.
+Works on a fresh clone with no credentials. Shows what a framework scores when governance is not in place: the scorecard floor.
 
 ```bash
 git clone https://github.com/agentic-control-plane/agentgovbench
@@ -68,7 +68,7 @@ pip install -e .
 agentgovbench run --runner vanilla
 ```
 
-Expected: **13/48** (April 2026 figure; re-measure with the current scorer before quoting) ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working.
+Expected: **13/48** (April 2026 figure; re-measure with the current scorer before quoting) ([full vanilla scorecard →](https://agenticcontrolplane.com/blog/full-scorecard-seven-frameworks-48-scenarios)). Shows the harness, scorer, and scenario library are working. This baseline is a stand-in that allows every call and logs nothing. It is not a measurement of Claude Code or any shipped product.
 
 ### 2. Reproduce the ACP score (all 48 scenarios, about 15 minutes)
 
@@ -99,18 +99,20 @@ You get your own X/48. Declined and unmeasured scenarios count against the score
 
 The runner **preflights** each key (reads the workspace's policy and writes it back) before scoring. A `403 human-auth-required` means the slug is not a benchmark workspace and the run stops with no scorecard, rather than scoring scenarios that never got their policy.
 
-How the hook runner is honest about what it is: the hook is the unmodified shipped file and the outage is real, but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in (the hook is pointed at it through the plugin's own dev override file under a temp HOME). This category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so a `fail_open` scenario runs as an attended session and `fail_closed` as an unattended one. That mapping is the runner's and part of the method, not a product claim.
+What the hook runner is: the hook is the unmodified shipped file and the outage is real, but the gateway during recovery and in the no-failure baseline is a local always-allow stand-in (the hook is pointed at it through the plugin's own dev override file under a temp HOME). This category measures the client's failure posture only. The plugin has no per-tenant fail-mode setting; it fails open (loudly) for attended sessions and closed for unattended ones, so a `fail_open` scenario runs as an attended session and `fail_closed` as an unattended one. That mapping is the runner's and part of the method, not a product claim.
 
 The merged, dated scorecard is also produced by [the scheduled workflow](.github/workflows/daily-acp-regression.yml).
 
 Known non-passes in the last published run, counted in the score: `scope_inheritance.04_task_narrowing` (declined: ACP does not yet hold a sub-agent to a narrower task than its parent's scope) and `fail_mode_discipline.05_no_audit_without_governance` (the hook's offline record of an ungoverned call carries no user identity, so the scenario's attribution check cannot be met client-side). Your run names whatever it finds.
 
-> **"RUN ABORTED — no scorecard produced"?** ACP refused the benchmark's policy write (403) or the key itself (401). Only a **Create benchmark workspaces** key on its own `-agb` workspace may write those policies. Check the keys haven't expired (24h) and that the slugs match what the card showed.
+> **"RUN ABORTED: no scorecard produced"?** ACP refused the benchmark's policy write (403) or the key itself (401). Only a **Create benchmark workspaces** key on its own `-agb` workspace may write those policies. Check the keys haven't expired (24h) and that the slugs match what the card showed.
 
-### 3. Run any framework — seven frameworks, each with a native and an ACP runner
+### 3. Run any framework
+
+Seven frameworks, each with a native and an ACP runner:
 
 ```bash
-agentgovbench run --runner crewai_native                # CrewAI without governance — baseline
+agentgovbench run --runner crewai_native                # CrewAI without governance (baseline)
 agentgovbench run --runner crewai_acp                   # CrewAI + ACP @governed decorator
 agentgovbench run --runner langgraph_native
 agentgovbench run --runner langgraph_acp
@@ -142,17 +144,17 @@ Same gateway. Same scenarios. Same scorer. The spread is architectural, not prod
 
 ## Design principles
 
-- **Deterministic** — no LLM in the hot path. Scenarios fully describe the agent action sequence; governance is tested on what it does with those actions. Reproducible byte-for-byte across runs.
-- **Framework-agnostic** — scenarios don't assume CrewAI, LangGraph, Claude, etc. They describe actions and expected governance outcomes.
-- **Pluggable** — any governance product implements the `BaseRunner` interface. No ACP assumptions in the scenarios.
-- **Versioned** — each scenario carries a version. Old results remain comparable; new scenarios extend the set without breaking history.
-- **Published honest** — the ACP scorecard names every declined or unmeasured scenario and counts it as a failure. Today that is one declination (task narrowing) and one failing check (the offline record of an ungoverned call doesn't name the user). A benchmark that says *"we pass everything"* isn't credible.
+- **Deterministic:** no LLM in the hot path. Scenarios fully describe the agent action sequence; governance is tested on what it does with those actions. Reproducible byte-for-byte across runs.
+- **Framework-agnostic:** scenarios don't assume CrewAI, LangGraph, Claude, etc. They describe actions and expected governance outcomes.
+- **Pluggable:** any governance product implements the `BaseRunner` interface. No ACP assumptions in the scenarios.
+- **Versioned:** each scenario carries a version. Old results remain comparable; new scenarios extend the set without breaking history.
+- **Published with the misses:** the ACP scorecard names every declined or unmeasured scenario and counts it as a failure. Today that is one declination (task narrowing) and one failing check (the offline record of an ungoverned call doesn't name the user). A benchmark that says *"we pass everything"* isn't credible.
 
 ## Submitting results for your product
 
-We want your product represented. The ACP team built this benchmark, but the scenarios don't know what ACP is — the same `BaseRunner` interface works for any governance product, regardless of vendor.
+We want your product represented. The ACP team built this benchmark, but the scenarios don't know what ACP is. The same `BaseRunner` interface works for any governance product.
 
-1. Implement `BaseRunner` in `runners/<your-product>.py` — typically ~200 lines.
+1. Implement `BaseRunner` in `runners/<your-product>.py`, typically about 200 lines.
 2. Run the full scenario set and commit `results/<your-product>-vX.Y.Z.json`.
 3. Open a PR. No cherry-picking, no hidden config. That's the point.
 
@@ -160,7 +162,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the runner template and PR checklis
 
 ## Status
 
-**v0.2** — 48 scenarios across 8 categories. ACP is scored out of all 48 by `scripts/scorecard.py` from two runners (HTTP against production, and the real Claude Code hook for the outage scenarios); see the daily workflow summary for the dated number. The old per-framework figures above predate runner-neutral scoring and are historical. Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
+**v0.2:** 48 scenarios across 8 categories. ACP is scored out of all 48 by `scripts/scorecard.py` from two runners (HTTP against production, and the real Claude Code hook for the outage scenarios); see the daily workflow summary for the dated number. The old per-framework figures above predate runner-neutral scoring and are historical. Seven frameworks shipped, each with a native and an ACP runner. Live scorecard at [agenticcontrolplane.com/benchmark](https://agenticcontrolplane.com/benchmark).
 
 Maintained by the [Agentic Control Plane](https://agenticcontrolplane.com) team. We put a number on our own product; we'd like the rest of the space to do the same.
 
